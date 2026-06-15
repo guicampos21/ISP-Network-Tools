@@ -1,0 +1,27 @@
+INH release manifest
+Release: v1.0.0
+Readable source preserved: yes
+Key files:
+./.gitignore
+./AUTHORS
+./CONTRIBUTING.md
+./LICENSE
+./README.md
+./README.pt-BR.md
+./SOURCE_MANIFEST.txt
+./docs/architecture.md
+./docs/risk-model.md
+./docs/usage.md
+./pyproject.toml
+./scripts/inh
+./screenshots/01-cli-start.svg
+./screenshots/02-report-summary.svg
+./screenshots/03-ip-inventory.svg
+./src/inh/__init__.py
+./src/inh/__main__.py
+./src/inh/cli.py
+./src/inh/core.py
+./src/inh/resources/__init__.py
+./src/inh/resources/help_text.txt
+./src/inh/resources/help_text_en.txt
+./tests/test_risk_logic.py

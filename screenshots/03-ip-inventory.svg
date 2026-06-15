@@ -1,0 +1,69 @@
+<!--
+Copyright (C) 2026 Guilherme Campos
+SPDX-License-Identifier: GPL-3.0-or-later
+-->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="675" viewBox="0 0 1200 675" role="img" aria-labelledby="title desc">
+  <title id="title">INH IP inventory example</title>
+  <desc id="desc">Demonstrative IP inventory table using documentation IP ranges.</desc>
+  <rect width="1200" height="675" fill="#f3f6f8"/>
+  <rect x="62" y="42" width="1076" height="590" rx="24" fill="#ffffff" stroke="#d8e2ea"/>
+  <text x="102" y="96" fill="#102a43" font-family="DejaVu Sans, Arial, sans-serif" font-size="30" font-weight="800">IP Inventory and Evidence</text>
+  <text x="102" y="126" fill="#627386" font-family="DejaVu Sans, Arial, sans-serif" font-size="17">Target: 203.0.113.0/28 | Demonstrative data | Report language: English</text>
+
+  <rect x="102" y="166" width="996" height="46" rx="12" fill="#0d3b4c"/>
+  <g fill="#ffffff" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="700">
+    <text x="124" y="195">IP Address</text>
+    <text x="292" y="195">Risk</text>
+    <text x="432" y="195">Probe</text>
+    <text x="574" y="195">Blacklist Evidence</text>
+    <text x="962" y="195">Family</text>
+  </g>
+
+  <g font-family="DejaVu Sans, Arial, sans-serif" font-size="15">
+    <rect x="102" y="226" width="996" height="64" rx="10" fill="#fff3e5" stroke="#f2c58c"/>
+    <text x="124" y="264" fill="#102a43" font-weight="700">203.0.113.14</text>
+    <rect x="292" y="242" width="78" height="26" rx="13" fill="#f28c38"/>
+    <text x="331" y="261" text-anchor="middle" fill="#ffffff" font-weight="700">high</text>
+    <rect x="432" y="242" width="82" height="26" rx="13" fill="#20744a"/>
+    <text x="473" y="261" text-anchor="middle" fill="#ffffff" font-weight="700">online</text>
+    <rect x="574" y="238" width="172" height="30" rx="15" fill="#f28c38"/>
+    <text x="660" y="258" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="700">b.barracudacentral.org</text>
+    <rect x="756" y="238" width="180" height="30" rx="15" fill="#f28c38"/>
+    <text x="846" y="258" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="700">bb.barracudacentral.org</text>
+    <text x="962" y="264" fill="#603b0b" font-weight="700">Barracuda</text>
+
+    <rect x="102" y="304" width="996" height="64" rx="10" fill="#fff3e5" stroke="#f2c58c"/>
+    <text x="124" y="342" fill="#102a43" font-weight="700">203.0.113.17</text>
+    <rect x="292" y="320" width="78" height="26" rx="13" fill="#f28c38"/>
+    <text x="331" y="339" text-anchor="middle" fill="#ffffff" font-weight="700">high</text>
+    <rect x="432" y="320" width="118" height="26" rx="13" fill="#66788a"/>
+    <text x="491" y="339" text-anchor="middle" fill="#ffffff" font-weight="700">no response</text>
+    <rect x="574" y="316" width="172" height="30" rx="15" fill="#f28c38"/>
+    <text x="660" y="336" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="700">b.barracudacentral.org</text>
+    <rect x="756" y="316" width="180" height="30" rx="15" fill="#f28c38"/>
+    <text x="846" y="336" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="700">bb.barracudacentral.org</text>
+    <text x="962" y="342" fill="#603b0b" font-weight="700">Barracuda</text>
+
+    <rect x="102" y="382" width="996" height="64" rx="10" fill="#edf8f1" stroke="#bddfc9"/>
+    <text x="124" y="420" fill="#102a43" font-weight="700">203.0.113.18</text>
+    <rect x="292" y="398" width="88" height="26" rx="13" fill="#20744a"/>
+    <text x="336" y="417" text-anchor="middle" fill="#ffffff" font-weight="700">clean</text>
+    <rect x="432" y="398" width="82" height="26" rx="13" fill="#20744a"/>
+    <text x="473" y="417" text-anchor="middle" fill="#ffffff" font-weight="700">online</text>
+    <text x="574" y="420" fill="#5c6c7a">Not listed</text>
+    <text x="962" y="420" fill="#5c6c7a">-</text>
+
+    <rect x="102" y="460" width="996" height="64" rx="10" fill="#f4f7fa" stroke="#d8e2ea"/>
+    <text x="124" y="498" fill="#102a43" font-weight="700">203.0.113.19</text>
+    <rect x="292" y="476" width="92" height="26" rx="13" fill="#66788a"/>
+    <text x="338" y="495" text-anchor="middle" fill="#ffffff" font-weight="700">timeout</text>
+    <rect x="432" y="476" width="118" height="26" rx="13" fill="#66788a"/>
+    <text x="491" y="495" text-anchor="middle" fill="#ffffff" font-weight="700">no response</text>
+    <text x="574" y="498" fill="#5c6c7a">No hit; partial DNSBL timeout</text>
+    <text x="962" y="498" fill="#5c6c7a">-</text>
+  </g>
+
+  <rect x="102" y="552" width="996" height="42" rx="12" fill="#edf3f7"/>
+  <text x="124" y="578" fill="#516272" font-family="DejaVu Sans, Arial, sans-serif" font-size="14">DNSBL code legend: 127.x.x.x normally indicates a hit. Timeout is inconclusive and never counts as a hit.</text>
+  <text x="102" y="616" fill="#6b7c8c" font-family="DejaVu Sans, Arial, sans-serif" font-size="14">Demonstration only. Uses RFC 5737 documentation IPs and synthetic blacklist evidence.</text>
+</svg>
