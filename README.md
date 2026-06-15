@@ -103,15 +103,15 @@ The images below are demonstrative examples built with RFC 5737 documentation IP
 
 ### CLI execution
 
-![INH CLI example](screenshots/01-cli-start.svg)
+![INH CLI example](screenshots/01-cli-start.png)
 
 ### HTML report summary
 
-![INH HTML report summary](screenshots/02-report-summary.svg)
+![INH HTML report summary](screenshots/02-report-summary.png)
 
 ### IP inventory and evidence
 
-![INH IP inventory](screenshots/03-ip-inventory.svg)
+![INH IP inventory](screenshots/03-ip-inventory.png)
 
 ---
 
