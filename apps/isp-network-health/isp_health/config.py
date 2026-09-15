@@ -26,6 +26,7 @@ def database_url() -> str:
 
 def app_config() -> dict[str, object]:
     environment = os.getenv("APP_ENV", "production").strip().lower()
+    secure_prefix = "__Host-" if environment == "production" else ""
     return {
         "SECRET_KEY": read_secret("SECRET_KEY"),
         "SSO_SIGNING_SECRET": read_secret("SSO_SIGNING_SECRET"),
@@ -40,7 +41,7 @@ def app_config() -> dict[str, object]:
             ).split(",")
             if item.strip()
         ],
-        "SESSION_COOKIE_NAME": "__Host-isp_network_health",
+        "SESSION_COOKIE_NAME": f"{secure_prefix}isp_network_health",
         "SESSION_COOKIE_SECURE": environment == "production",
         "SESSION_COOKIE_HTTPONLY": True,
         "SESSION_COOKIE_SAMESITE": "Lax",

@@ -1,9 +1,18 @@
+import os
 import unittest
+from unittest.mock import patch
 
+from isp_health.config import app_config
 from isp_shared.sso import HandoffError, issue_handoff, verify_handoff
 
 
 class SsoHandoffTests(unittest.TestCase):
+    def test_cookie_name_matches_transport_security(self):
+        with patch.dict(os.environ, {"APP_ENV": "development"}):
+            self.assertEqual(app_config()["SESSION_COOKIE_NAME"], "isp_network_health")
+        with patch.dict(os.environ, {"APP_ENV": "production"}):
+            self.assertEqual(app_config()["SESSION_COOKIE_NAME"], "__Host-isp_network_health")
+
     def test_signed_handoff_round_trips(self):
         token = issue_handoff(
             "test-signing-secret",

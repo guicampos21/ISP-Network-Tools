@@ -21,11 +21,11 @@ jobs:
       - name: Secret scan
         run: ./scripts/secret-check.sh
       - name: Install test dependencies
-        run: python -m pip install --disable-pip-version-check pytest
+        run: python -m pip install --disable-pip-version-check pytest -r apps/admin-center/requirements.txt -r apps/isp-network-health/requirements.txt
       - name: Admin Center tests
         run: PYTHONPATH=apps/admin-center:packages pytest -q apps/admin-center/tests
       - name: INH tests
-        run: PYTHONPATH=apps/isp-network-health/src python -m unittest discover -s apps/isp-network-health/tests -v
+        run: PYTHONPATH=apps/isp-network-health/src:apps/isp-network-health:packages python -m unittest discover -s apps/isp-network-health/tests -v
 
   compose:
     runs-on: ubuntu-latest

@@ -14,6 +14,11 @@ def login_as(client, app, email):
         session["user_id"] = user_id
 
 
+def test_development_cookies_are_compatible_with_local_http(app):
+    assert app.config["SESSION_COOKIE_NAME"] == "isp_network_tools"
+    assert app.config["REMEMBER_COOKIE_NAME"] == "geofeed_remember"
+
+
 def test_application_access_is_deny_by_default_and_honors_group_and_direct_grants(app):
     with app.app_context():
         user = User.query.filter_by(email="viewer@example.test").one()

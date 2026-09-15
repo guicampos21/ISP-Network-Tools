@@ -58,12 +58,16 @@ class Config:
         if item.strip()
     ]
     SESSION_COOKIE_SECURE = APP_ENV == "production"
-    SESSION_COOKIE_NAME = "__Host-isp_network_tools"
+    SESSION_COOKIE_NAME = (
+        "__Host-isp_network_tools" if APP_ENV == "production" else "isp_network_tools"
+    )
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
     SESSION_COOKIE_PATH = "/"
     PREFERRED_URL_SCHEME = "https"
-    REMEMBER_COOKIE_NAME = "__Host-geofeed_remember"
+    REMEMBER_COOKIE_NAME = (
+        "__Host-geofeed_remember" if APP_ENV == "production" else "geofeed_remember"
+    )
     REMEMBER_COOKIE_DAYS = max(1, int(os.getenv("REMEMBER_COOKIE_DAYS", "30")))
     TOTP_ISSUER = os.getenv("TOTP_ISSUER", SUITE_NAME).strip()
     PERMANENT_SESSION_LIFETIME = timedelta(

@@ -42,6 +42,12 @@ def create_app(test_config: dict | None = None) -> Flask:
     app.config.from_object(Config)
     if test_config:
         app.config.update(test_config)
+    if not test_config or "SESSION_COOKIE_NAME" not in test_config:
+        secure_prefix = "__Host-" if app.config.get("APP_ENV") == "production" else ""
+        app.config["SESSION_COOKIE_NAME"] = f"{secure_prefix}isp_network_tools"
+    if not test_config or "REMEMBER_COOKIE_NAME" not in test_config:
+        secure_prefix = "__Host-" if app.config.get("APP_ENV") == "production" else ""
+        app.config["REMEMBER_COOKIE_NAME"] = f"{secure_prefix}geofeed_remember"
     if not app.config.get("SECRET_KEY"):
         raise RuntimeError("SECRET_KEY não configurada")
     if app.config.get("APP_ENV") == "production" and not app.config.get("SSO_SIGNING_SECRET"):

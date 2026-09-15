@@ -9,7 +9,7 @@ compile:
 
 test:
 	PYTHONPATH=apps/admin-center:packages $(PYTHON) -m pytest -q apps/admin-center/tests
-	PYTHONPATH=apps/isp-network-health/src $(PYTHON) -m unittest discover -s apps/isp-network-health/tests -v
+	PYTHONPATH=apps/isp-network-health/src:apps/isp-network-health:packages $(PYTHON) -m unittest discover -s apps/isp-network-health/tests -v
 
 compose-config:
 	test -f .env || cp .env.example .env

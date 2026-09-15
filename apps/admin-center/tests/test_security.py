@@ -617,7 +617,7 @@ def test_local_totp_setup_completes_login_and_remembered_session(client, app):
     response = client.post("/2fa/setup", data={"code": code})
     assert response.status_code == 302
     assert response.headers["Location"].endswith("/")
-    assert "__Host-geofeed_remember=" in response.headers.get("Set-Cookie", "")
+    assert "geofeed_remember=" in response.headers.get("Set-Cookie", "")
     with client.session_transaction() as session:
         session.clear()
     response = client.get("/")
