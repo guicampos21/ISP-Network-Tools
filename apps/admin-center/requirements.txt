@@ -1,0 +1,17 @@
+Flask>=3.1,<4
+Flask-SQLAlchemy>=3.1,<4
+Flask-WTF>=1.2,<2
+Flask-Limiter>=3.12,<5
+redis>=6,<7
+Authlib>=1.6,<2
+APScheduler>=3.11,<4
+gunicorn>=23,<24
+requests>=2.32,<3
+email-validator>=2.2,<3
+pyotp>=2.9,<3
+qrcode>=8.0,<9
+dicebear-core>=10.7,<11
+dicebear-styles>=10.6,<11
+Pillow>=11,<13
+pycountry>=24.6,<27
+psycopg[binary]>=3.2,<4

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Configurar 2FA{% endblock %}
+{% block content %}
+<section class="card form-card two-factor-card">
+  <p class="eyebrow">Primeiro acesso</p>
+  <h1>Configure a autenticação em dois fatores</h1>
+  <p class="muted">Abra o Microsoft Authenticator, Google Authenticator ou outro aplicativo TOTP e escaneie o QR Code.</p>
+  <div class="two-factor-setup">
+    <table class="qr-code" aria-label="QR Code para configurar o 2FA">{% for row in qr_matrix %}<tr>{% for cell in row %}<td class="{{ 'qr-dark' if cell else 'qr-light' }}"></td>{% endfor %}</tr>{% endfor %}</table>
+    <div><p><strong>Chave manual</strong></p><code class="secret-code">{{ uri }}</code><p class="muted small-text">Guarde os códigos de recuperação abaixo em local seguro. Eles não serão exibidos novamente.</p><div class="recovery-codes">{% for code in recovery_codes %}<code>{{ code }}</code>{% endfor %}</div></div>
+  </div>
+  <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><span>Código do aplicativo *</span><input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" required></label><button class="button button-primary" type="submit">Ativar 2FA e continuar</button></form>
+</section>
+{% endblock %}

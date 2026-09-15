@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Histórico{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Versionamento</p><h1>Histórico de publicações</h1></div></div>
+<section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Versão</th><th>Resumo</th><th>Responsável</th><th>Data</th><th>Hash</th></tr></thead><tbody>{% for publication in publications %}<tr><td><a class="text-link" href="{{ url_for('panel.history_detail', publication_id=publication.id) }}">v{{ publication.version }}</a></td><td>{{ publication.summary }}</td><td>{{ publication.published_by.email }}</td><td>{{ publication.published_at }}</td><td class="mono hash">{{ publication.snapshot_hash[:16] }}…</td></tr>{% else %}<tr><td colspan="5">Nenhuma publicação gerenciada pelo painel.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}

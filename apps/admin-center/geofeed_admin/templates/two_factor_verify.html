@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Verificação 2FA{% endblock %}
+{% block content %}
+<section class="card login-card two-factor-card">
+  <p class="eyebrow">Verificação adicional</p>
+  <h1>Confirme sua identidade</h1>
+  <p class="muted">Informe o código de seis dígitos do seu aplicativo autenticador ou um código de recuperação.</p>
+  <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><span>Código *</span><input name="code" inputmode="numeric" autocomplete="one-time-code" required></label><label class="check"><input type="checkbox" name="use_recovery"><span>Estou usando um código de recuperação</span></label><button class="button button-primary button-wide" type="submit">Verificar</button></form>
+</section>
+{% endblock %}

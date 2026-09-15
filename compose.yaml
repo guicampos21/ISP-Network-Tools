@@ -1,0 +1,290 @@
+name: ${COMPOSE_PROJECT_NAME:-isp-network-tools}
+
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-postgres:16.4-alpine}
+    entrypoint: ["/usr/local/bin/isp-postgres-entrypoint.sh"]
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-isp_network_tools}
+      POSTGRES_DB: ${POSTGRES_DB:-isp_core}
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      CORE_DB_USER: ${CORE_DB_USER:-isp_core}
+      GEOFEED_DB_USER: ${GEOFEED_DB_USER:-geofeed}
+      HEALTH_DB_USER: ${HEALTH_DB_USER:-isp_network_health}
+    secrets:
+      - postgres_password
+      - core_db_password
+      - geofeed_db_password
+      - health_db_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init/00-create-databases.sh:/docker-entrypoint-initdb.d/00-create-databases.sh:ro
+      - ./infra/postgres/entrypoint.sh:/usr/local/bin/isp-postgres-entrypoint.sh:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: ${REDIS_IMAGE:-redis:7.4-alpine}
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    security_opt:
+      - no-new-privileges:true
+
+  admin-center:
+    build:
+      context: .
+      dockerfile: apps/admin-center/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY_FILE: /run/secrets/app_secret_key
+      SSO_SIGNING_SECRET_FILE: /run/secrets/sso_signing_secret
+      SETUP_TOKEN_FILE: /run/secrets/setup_token
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-isp_core}
+      DATABASE_USER: ${CORE_DB_USER:-isp_core}
+      DATABASE_PASSWORD_FILE: /run/secrets/core_db_password
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-admin-center.localhost,localhost,127.0.0.1}
+      LOCAL_AUTH_ENABLED: ${LOCAL_AUTH_ENABLED:-true}
+      DEV_AUTH: ${DEV_AUTH:-false}
+      ENTRA_TENANT_ID: ${ENTRA_TENANT_ID:-}
+      ENTRA_CLIENT_ID: ${ENTRA_CLIENT_ID:-}
+      ENTRA_CLIENT_SECRET_FILE: /run/secrets/entra_client_secret
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET_FILE: /run/secrets/google_client_secret
+      GRAPH_PHOTO_ENABLED: ${GRAPH_PHOTO_ENABLED:-false}
+      SUITE_NAME: ${SUITE_NAME:-ISP Network Tools}
+      COMPANY_NAME: ${COMPANY_NAME:-Sua empresa}
+      PUBLIC_CONTACT_EMAIL: ${PUBLIC_CONTACT_EMAIL:-noc@example.invalid}
+      TOTP_ISSUER: ${TOTP_ISSUER:-ISP Network Tools}
+      SMTP_FROM: ${SMTP_FROM:-}
+      PUBLIC_ROOT: /publish
+      BACKUP_ROOT: /backups
+      AVATAR_ROOT: /data/avatars
+      BRANDING_ROOT: /data/branding
+    secrets:
+      - app_secret_key
+      - sso_signing_secret
+      - setup_token
+      - core_db_password
+      - entra_client_secret
+      - google_client_secret
+    volumes:
+      - admin_data:/data
+      - admin_backups:/backups
+      - geofeed_publish:/publish
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/internal/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    security_opt:
+      - no-new-privileges:true
+
+  admin-center-worker:
+    build:
+      context: .
+      dockerfile: apps/admin-center/Dockerfile
+    restart: unless-stopped
+    command: ["flask", "--app", "wsgi:app", "run-worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      SECRET_KEY_FILE: /run/secrets/app_secret_key
+      SETUP_TOKEN_FILE: /run/secrets/setup_token
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: ${POSTGRES_DB:-isp_core}
+      DATABASE_USER: ${CORE_DB_USER:-isp_core}
+      DATABASE_PASSWORD_FILE: /run/secrets/core_db_password
+      REDIS_URL: redis://redis:6379/0
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      TRUSTED_HOSTS: ${TRUSTED_HOSTS:-admin-center.localhost,localhost,127.0.0.1}
+      PUBLIC_ROOT: /publish
+      BACKUP_ROOT: /backups
+      AVATAR_ROOT: /data/avatars
+      BRANDING_ROOT: /data/branding
+      TOTP_ISSUER: ${TOTP_ISSUER:-ISP Network Tools}
+      PUBLIC_CONTACT_EMAIL: ${PUBLIC_CONTACT_EMAIL:-noc@example.invalid}
+    secrets:
+      - app_secret_key
+      - setup_token
+      - core_db_password
+    volumes:
+      - admin_data:/data
+      - admin_backups:/backups
+      - geofeed_publish:/publish
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+  geofeed-public:
+    build:
+      context: .
+      dockerfile: apps/geofeed-public/Dockerfile
+    restart: unless-stopped
+    environment:
+      COMPANY_NAME: ${COMPANY_NAME:-Sua empresa}
+      SUITE_NAME: ${SUITE_NAME:-ISP Network Tools}
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
+      PUBLIC_CONTACT_EMAIL: ${PUBLIC_CONTACT_EMAIL:-noc@example.invalid}
+    volumes:
+      - geofeed_publish:/usr/share/nginx/blocos:ro
+    networks:
+      - proxy
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "--quiet", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+
+  isp-network-health:
+    build:
+      context: .
+      dockerfile: apps/isp-network-health/Dockerfile
+    restart: unless-stopped
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SECRET_KEY_FILE: /run/secrets/health_secret_key
+      SSO_SIGNING_SECRET_FILE: /run/secrets/sso_signing_secret
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: isp_network_health
+      DATABASE_USER: ${HEALTH_DB_USER:-isp_network_health}
+      DATABASE_PASSWORD_FILE: /run/secrets/health_db_password
+      REDIS_URL: redis://redis:6379/1
+      INH_MAX_CIDR_IPS: ${INH_MAX_CIDR_IPS:-0}
+      HEALTH_WORKER_MAX_WORKERS: ${HEALTH_WORKER_MAX_WORKERS:-32}
+      ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      TRUSTED_HOSTS: ${HEALTH_TRUSTED_HOSTS:-network-health.localhost,localhost,127.0.0.1}
+      DEV_AUTH: ${DEV_AUTH:-false}
+    secrets:
+      - health_secret_key
+      - sso_signing_secret
+      - health_db_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+      - proxy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/internal/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    security_opt:
+      - no-new-privileges:true
+
+  isp-network-health-worker:
+    build:
+      context: .
+      dockerfile: apps/isp-network-health/Dockerfile
+    restart: unless-stopped
+    command: ["python", "-m", "isp_health.worker"]
+    environment:
+      APP_ENV: ${APP_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      DATABASE_NAME: isp_network_health
+      DATABASE_USER: ${HEALTH_DB_USER:-isp_network_health}
+      DATABASE_PASSWORD_FILE: /run/secrets/health_db_password
+      REDIS_URL: redis://redis:6379/1
+      INH_MAX_CIDR_IPS: ${INH_MAX_CIDR_IPS:-0}
+      HEALTH_WORKER_MAX_WORKERS: ${HEALTH_WORKER_MAX_WORKERS:-32}
+    secrets:
+      - health_db_password
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  postgres_data:
+  redis_data:
+  admin_data:
+  admin_backups:
+  geofeed_publish:
+
+networks:
+  backend:
+    internal: true
+  proxy:
+    external: true
+    name: ${PROXY_NETWORK:-npm_default}
+
+secrets:
+  postgres_password:
+    file: ${SECRETS_DIR:-./.local/secrets}/postgres_password
+  core_db_password:
+    file: ${SECRETS_DIR:-./.local/secrets}/core_db_password
+  geofeed_db_password:
+    file: ${SECRETS_DIR:-./.local/secrets}/geofeed_db_password
+  health_db_password:
+    file: ${SECRETS_DIR:-./.local/secrets}/health_db_password
+  app_secret_key:
+    file: ${SECRETS_DIR:-./.local/secrets}/app_secret_key
+  health_secret_key:
+    file: ${SECRETS_DIR:-./.local/secrets}/health_secret_key
+  sso_signing_secret:
+    file: ${SECRETS_DIR:-./.local/secrets}/sso_signing_secret
+  setup_token:
+    file: ${SECRETS_DIR:-./.local/secrets}/setup_token
+  entra_client_secret:
+    file: ${SECRETS_DIR:-./.local/secrets}/entra_client_secret
+  google_client_secret:
+    file: ${SECRETS_DIR:-./.local/secrets}/google_client_secret

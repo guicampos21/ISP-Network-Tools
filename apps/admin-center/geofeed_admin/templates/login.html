@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Entrar{% endblock %}
+{% block content %}
+<section class="login-card">
+  <div class="brand brand-login"><span class="brand-mark">I</span><span><strong>Admin Center</strong><small>{{ portal_branding.company_name }}</small></span></div>
+  <p class="eyebrow">Acesso administrativo</p>
+  <h1>Gerenciamento seguro de geofeeds</h1>
+  <p class="login-prompt">Entre com sua conta</p>
+  {% if local_auth_enabled %}<form id="local-login-form" method="post" action="{{ url_for('auth.local_login') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><span>Username</span><input name="username" autocomplete="username" required></label><label><span>Senha</span><input type="password" name="password" autocomplete="current-password" required></label><label class="check remember-choice"><input type="checkbox" name="remember" data-remember-toggle><span>Manter conectado neste dispositivo</span></label><button class="button button-secondary button-wide" type="submit">Entrar com conta local</button></form>{% elif entra_ready or google_ready %}<label class="check remember-choice"><input type="checkbox" data-remember-toggle><span>Manter conectado neste dispositivo</span></label>{% endif %}
+  {% if entra_ready or google_ready %}<p class="login-alternative">Ou entre com:</p><div class="login-providers">{% if entra_ready %}<a class="button button-primary microsoft-button button-wide" data-remember-link="{{ url_for('auth.entra_login') }}" href="{{ url_for('auth.entra_login') }}"><span class="microsoft-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Microsoft 365</a>{% endif %}{% if google_ready %}<a class="button button-secondary google-button button-wide" data-remember-link="{{ url_for('auth.google_login') }}" href="{{ url_for('auth.google_login') }}"><span class="google-logo" aria-hidden="true">G</span>Google Workspace</a>{% endif %}</div>{% endif %}
+  {% if dev_auth %}
+  <form method="post" action="{{ url_for('auth.dev_login') }}" class="dev-login">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button class="button button-secondary button-wide" type="submit">Login de desenvolvimento</button>
+  </form>
+  {% endif %}
+  {% if setup_available %}<p class="setup-link"><a href="{{ url_for('auth.setup') }}">Configurar primeiro SuperAdmin</a></p>{% endif %}
+</section>
+{% endblock %}

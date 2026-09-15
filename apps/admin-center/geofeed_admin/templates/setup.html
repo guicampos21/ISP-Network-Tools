@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Primeiro acesso{% endblock %}
+{% block content %}
+<section class="login-card">
+  <div class="brand brand-login"><span class="brand-mark" aria-hidden="true">I</span><span><strong>Admin Center</strong><small>{{ portal_branding.suite_name }}</small></span></div>
+  <p class="eyebrow">Configuração inicial</p>
+  <h1>Criar SuperAdmin local</h1>
+  <p class="login-prompt">Use o token entregue pelo implantador. Depois deste cadastro, o bootstrap será encerrado.</p>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label><span>Token de bootstrap</span><input name="setup_token" type="password" autocomplete="off" required></label>
+    <label><span>Username</span><input name="username" autocomplete="username" pattern="[a-z0-9][a-z0-9._-]{2,79}" required></label>
+    <label><span>E-mail</span><input name="email" type="email" autocomplete="email" required></label>
+    <label><span>Nome de exibição</span><input name="display_name" autocomplete="name" required></label>
+    <label><span>Senha</span><input name="password" type="password" autocomplete="new-password" minlength="12" required><small>Use maiúscula, minúscula, número e símbolo.</small></label>
+    <label><span>Confirmar senha</span><input name="password_confirm" type="password" autocomplete="new-password" minlength="12" required></label>
+    <button class="button button-primary button-wide" type="submit">Criar SuperAdmin</button>
+  </form>
+</section>
+{% endblock %}

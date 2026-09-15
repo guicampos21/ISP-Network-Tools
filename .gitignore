@@ -1,0 +1,39 @@
+# Runtime configuration and secrets
+.env
+.env.*
+!.env.example
+admin.env.stage
+config/*.env
+secrets/
+!.codex/
+.local/
+
+# Application state
+data/
+backups/
+publish/
+*.sqlite3
+*.db
+*.log
+coverage/
+.pytest_cache/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Build and editor output
+dist/
+build/
+*.egg-info/
+.DS_Store
+.idea/
+.vscode/
+
+# Generated public artifacts and local reports
+apps/geofeed-public/public/*.csv
+apps/geofeed-public/public/geofeed-manifest.json
+apps/isp-network-health/reports/
+
+# Never commit deployment-only source files
+docker-compose.override.yml

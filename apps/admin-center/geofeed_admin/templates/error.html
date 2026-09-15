@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}Erro {{ code }}{% endblock %}
+{% block content %}
+<section class="empty-state">
+  <p class="eyebrow">Erro {{ code }}</p>
+  <h1>{{ message }}</h1>
+  <p class="muted">Nenhuma alteração foi aplicada.</p>
+  <a class="button button-primary" href="{{ url_for('panel.dashboard') if current_user else url_for('auth.login') }}">Voltar</a>
+</section>
+{% endblock %}

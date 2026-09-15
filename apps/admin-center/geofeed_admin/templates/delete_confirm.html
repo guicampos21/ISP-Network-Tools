@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}{{ title }}{% endblock %}
+{% block content %}
+<section class="card confirmation-card">
+  <p class="eyebrow">Operação destrutiva</p>
+  <h1>{{ heading }}</h1>
+  <p class="muted">{{ message }}</p>
+  <h2>Serão excluídos</h2>
+  <ul class="message-list warning-list">{% for item in consequences %}<li>{{ item }}</li>{% endfor %}</ul>
+  <div class="form-actions">
+    <a class="button button-secondary" href="{{ url_for(cancel_endpoint, **(cancel_values or {})) }}">Cancelar</a>
+    <form method="post" data-confirm="Confirma definitivamente esta exclusão? Esta ação não poderá ser desfeita.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <input type="hidden" name="confirm" value="yes">
+      <button class="button button-danger" type="submit">Confirmar exclusão</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

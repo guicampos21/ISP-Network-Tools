@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex,nofollow,noarchive">
+  <title>ISP Network Health</title>
+  {% if selected_scan and selected_scan.status in ['queued', 'running'] %}<meta http-equiv="refresh" content="10">{% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='health.css') }}">
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">H</span><span><strong>ISP Network Health</strong><small>{{ health_user.name or health_user.email }}</small></span></a>
+      <div class="form-actions"><a class="button" href="{{ admin_base_url }}">Admin Center</a><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button" type="submit">Sair</button></form></div>
+    </header>
+    <section class="heading">
+      <div><p class="eyebrow">Diagnóstico operacional</p><h1>Saúde da sua rede</h1><p class="muted">Analise a reputação de domínios, IPv4, blocos CIDR e ASNs com execução em segundo plano.</p></div>
+    </section>
+    {% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<p class="status status-{{ category }}">{{ message }}</p>{% endfor %}{% endwith %}
+    <div class="grid">
+      <section class="card">
+        <div class="card-heading"><div><h2>Nova análise</h2><p class="muted">As consultas externas são executadas pelo worker.</p></div></div>
+        <form method="post" action="{{ url_for('create_scan_route') }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          <label>Alvo<input name="target" maxlength="253" required placeholder="exemplo.com ou 203.0.113.25/28" autocomplete="off"></label>
+          <label>Perfil<select name="profile"><option value="conservative">Conservador</option><option value="aggressive">Agressivo</option></select></label>
+          <div class="form-actions"><button class="button button-primary" type="submit">Enfileirar análise</button></div>
+        </form>
+      </section>
+      <section class="card">
+        <div class="card-heading"><div><h2>Regras da coleta</h2><p class="muted">O serviço aplica as mesmas regras do núcleo INH.</p></div></div>
+        <ul class="muted"><li>Somente IPv4 público e globalmente roteável.</li><li>DNSBL, RDAP, WHOIS e fontes externas têm timeout.</li><li>Uma análise ativa por usuário.</li><li>Resultados ficam isolados por usuário.</li></ul>
+      </section>
+    </div>
+    <section class="card history">
+      <div class="card-heading"><div><h2>Histórico recente</h2><p class="muted">Até 40 análises do usuário atual.</p></div></div>
+      <div class="scan-list">
+      {% for scan in scans %}
+        <div class="scan-row">
+          <div><a href="{{ url_for('scan_detail', scan_id=scan.id) }}"><strong>#{{ scan.id }} · {{ scan.target }}</strong></a><div class="scan-meta"><span>{{ scan.target_kind|upper }}</span><span>{{ scan.created_at }}</span><span>{{ scan.completed_checks }}/{{ scan.total_checks }} verificações</span></div></div>
+          <span class="status status-{{ scan.status }}">{{ {'queued':'na fila','running':'executando','succeeded':'concluída','failed':'falhou','canceled':'cancelada'}.get(scan.status, scan.status) }}</span>
+        </div>
+      {% else %}<p class="empty">Nenhuma análise foi criada ainda.</p>{% endfor %}
+      </div>
+    </section>
+    {% if selected_scan %}
+    <section class="card detail">
+      <div class="card-heading"><div><p class="eyebrow">Resultado</p><h2>#{{ selected_scan.id }} · {{ selected_scan.target }}</h2></div><span class="status status-{{ selected_scan.status }}">{{ selected_scan.status }}</span></div>
+      <dl><dt>Perfil</dt><dd>{{ selected_scan.profile }}</dd><dt>Estado</dt><dd>{{ selected_scan.completed_checks }} de {{ selected_scan.total_checks }} verificações</dd>{% if selected_scan.error_message %}<dt>Erro</dt><dd>{{ selected_scan.error_message }}</dd>{% endif %}</dl>
+      {% if selected_scan.status in ['queued','running'] %}<p class="muted">Esta página atualiza automaticamente enquanto o worker processa a análise.</p><form method="post" action="{{ url_for('cancel_scan', scan_id=selected_scan.id) }}" class="detail-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit">Cancelar análise</button></form>{% endif %}
+      {% if selected_scan.summary_json %}<h3 class="summary-title">Resumo</h3><p class="muted">IPs analisados: {{ selected_scan.summary_json.get('unique_ips_scanned', 0) }} · IPs listados: {{ selected_scan.summary_json.get('unique_ips_listed', 0) }} · Risco: {{ selected_scan.summary_json.get('risk_level', 'indisponível') }}</p>{% endif %}
+      {% if results %}<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Alvo</th><th>Lista</th><th>Estado</th><th>Respostas</th></tr></thead><tbody>{% for result in results %}<tr><td>{{ result.target_value }}</td><td>{{ result.blacklist }}</td><td>{{ result.status }}</td><td>{{ result.answers|join(', ') }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    </section>
+    {% endif %}
+  </main>
+</body>
+</html>

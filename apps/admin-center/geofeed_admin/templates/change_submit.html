@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Aprovações{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Fluxo de publicação</p><h1>Aprovações</h1><p class="muted">As solicitações são criadas diretamente nas telas de blocos e entradas.</p></div><a class="button button-secondary" href="{{ url_for('panel.blocks') }}">Ir para blocos</a></div>
+<section class="card"><h2>Como enviar uma alteração</h2><p class="muted">Abra um bloco, altere os dados e informe a observação para o administrador. A alteração ficará pendente até a revisão.</p></section>
+{% endblock %}

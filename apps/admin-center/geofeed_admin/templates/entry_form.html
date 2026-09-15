@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar entrada' if entry else 'Nova entrada' }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow mono">{{ block.cidr }}</p><h1>{{ 'Editar entrada' if entry else 'Nova entrada' }}</h1></div><a class="button button-secondary" href="{{ url_for('panel.block_detail', block_id=block.id) }}">Voltar</a></div>
+<form class="card form-card" method="post"{% if entry %} data-change-review data-change-kind="entrada" data-change-action="{{ 'Enviar para aprovação' if current_user.role == 'editor' else 'Confirmar e publicar' }}"{% endif %}>
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  {% if entry %}<input type="hidden" name="confirm_changes" value="">{% endif %}
+  <div class="form-grid">
+    <label class="full"><span>Prefixo CIDR *</span><input class="mono" name="prefix" maxlength="64" required value="{{ request.form.get('prefix', entry.prefix if entry else '') }}"></label>
+    <label><span>País ISO 3166-1</span><input name="alpha2code" maxlength="2" value="{{ request.form.get('alpha2code', entry.alpha2code if entry else 'BR') }}"></label>
+    <label><span>Região ISO 3166-2</span><input name="region" maxlength="16" value="{{ request.form.get('region', entry.region if entry else 'BR-PR') }}"></label>
+    <label><span>Cidade</span><input name="city" maxlength="160" value="{{ request.form.get('city', entry.city if entry else '') }}"></label>
+    <label><span>Código postal</span><input name="postal_code" maxlength="32" value="{{ request.form.get('postal_code', entry.postal_code if entry else '') }}"><small>Campo desaconselhado pela RFC 8805.</small></label>
+    <label><span>Ordem</span><input name="sort_order" type="number" min="0" value="{{ request.form.get('sort_order', entry.sort_order if entry else 0) }}"></label>
+  </div>
+  {% if suggested_cidr %}<div class="subnet-suggestion" data-subnet-suggestion role="alert"><strong>Sub-rede sugerida</strong><p>O endereço informado não é o início correto desta sub-rede. A sub-rede correta para este cadastro seria <span class="mono">{{ suggested_cidr }}</span>. Deseja aplicar a sub-rede sugerida?</p><div class="form-actions"><button class="button button-primary" type="submit" name="accept_suggested_cidr" value="yes">Sim, aplicar</button><button class="button button-secondary" type="button" data-dismiss-suggestion>Não, vou corrigir</button></div></div>{% endif %}
+  {% if current_user.role == 'editor' %}<label><span>Observação para o administrador *</span><textarea name="notes" maxlength="4000" rows="4" required placeholder="Descreva o motivo desta alteração.">{{ request.form.get('notes', '') }}</textarea></label>{% endif %}
+  <div class="form-actions"><button class="button button-primary" type="submit">{{ 'Revisar alteração' if entry else 'Salvar e validar' }}</button></div>
+</form>
+{% endblock %}

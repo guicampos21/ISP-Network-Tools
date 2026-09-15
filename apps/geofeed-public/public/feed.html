@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Visualização legível dos dados públicos de geofeed.">
+    <title>Geofeed ${COMPANY_NAME}</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --brand: #5619a3;
+            --brand-light: #9b6be1;
+            --background: #08060c;
+            --surface: #120e18;
+            --surface-light: #1a1323;
+            --border: #362744;
+            --text: #f7f3fb;
+            --muted: #bdb2c8;
+        }
+        * { box-sizing: border-box; }
+        html { min-height: 100%; background: var(--background); }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 90% 0%, rgba(86, 25, 163, 0.24), transparent 32rem),
+                linear-gradient(180deg, #0d0913 0%, var(--background) 42%);
+            font-family: Tahoma, Verdana, Arial, sans-serif;
+            line-height: 1.5;
+        }
+        body::before { content: ""; display: block; height: 5px; background: linear-gradient(90deg, var(--brand), #7c32c7 65%, var(--brand-light)); }
+        main { width: min(74em, calc(100% - 2em)); margin: 0 auto; padding: 2.5em 0 3em; }
+        a { color: #c59af5; font-weight: bold; text-underline-offset: 0.2em; }
+        a:hover { color: #e2c9ff; }
+        a:focus-visible, button:focus-visible, input:focus-visible { outline: 2px solid var(--brand-light); outline-offset: 3px; }
+        .back { display: inline-block; margin-bottom: 2em; text-decoration: none; }
+        .brand-row { margin-bottom: 2.25em; }
+        .brand-row span { font-size: 1.45em; font-weight: bold; }
+        .admin-link { margin-left: 0.8em; color: #e2c9ff; font-size: 0.85em; }
+        .admin-link:hover { color: #fff; }
+        .admin-link:focus-visible { outline: 2px solid var(--brand-light); outline-offset: 3px; }
+        .eyebrow { margin: 0 0 0.45em; color: var(--brand-light); font-size: 0.75em; font-weight: bold; letter-spacing: 0.14em; text-transform: uppercase; }
+        h1 { margin: 0; font-size: clamp(2em, 7vw, 3.8em); line-height: 1.06; letter-spacing: -0.04em; }
+        .context { margin: 0.7em 0 0; color: var(--muted); }
+        .actions { display: flex; flex-wrap: wrap; gap: 0.7em; margin-top: 1.4em; }
+        .button {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.65em 0.9em;
+            border: 1px solid #7743b8;
+            border-radius: 0.4em;
+            color: #fff;
+            background: var(--brand);
+            font: inherit;
+            font-size: 0.9em;
+            font-weight: bold;
+            text-decoration: none;
+            cursor: pointer;
+        }
+        .button.secondary { color: #e8dafa; background: transparent; }
+        .button:hover { color: #fff; border-color: var(--brand-light); background: #6b24bb; }
+        .stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 0.75em; margin: 2.2em 0; }
+        .stat { min-width: 0; padding: 1em; border: 1px solid var(--border); border-radius: 0.65em; background: var(--surface); }
+        .stat dt { color: var(--muted); font-size: 0.7em; font-weight: bold; letter-spacing: 0.07em; text-transform: uppercase; }
+        .stat dd { margin: 0.35em 0 0; font-weight: bold; overflow-wrap: anywhere; }
+        section { margin-top: 2.5em; }
+        section h2 { margin: 0 0 0.25em; font-size: 1.35em; }
+        .section-description { margin: 0 0 1em; color: var(--muted); }
+        .city-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.7em; }
+        .city-card { display: flex; align-items: center; justify-content: space-between; gap: 1em; padding: 0.85em 1em; border: 1px solid var(--border); border-radius: 0.55em; background: var(--surface); }
+        .city-card strong { display: block; }
+        .city-card small { color: var(--muted); }
+        .count { min-width: 2.4em; padding: 0.2em 0.5em; border-radius: 999px; color: #eadbfa; background: rgba(86, 25, 163, 0.45); text-align: center; font-weight: bold; }
+        .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 1em; margin: 1em 0; }
+        .search { width: min(28em, 100%); padding: 0.7em 0.85em; border: 1px solid var(--border); border-radius: 0.45em; color: var(--text); background: var(--surface); font: inherit; }
+        .result-count { color: var(--muted); font-size: 0.85em; white-space: nowrap; }
+        .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 0.7em; background: var(--surface); }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 0.8em 0.9em; border-bottom: 1px solid var(--border); text-align: left; }
+        th { color: #d9c8ed; background: var(--surface-light); font-size: 0.72em; letter-spacing: 0.07em; text-transform: uppercase; }
+        tbody tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: rgba(86, 25, 163, 0.11); }
+        td:first-child { color: #d3aef7; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-weight: bold; }
+        .loading, .error { padding: 1em; border: 1px solid var(--border); border-radius: 0.55em; color: var(--muted); background: var(--surface); }
+        .error { color: #ffb4b4; border-color: #713737; }
+        .contacts { margin-top: 2.5em; padding: 1.1em 1.3em; border: 1px solid var(--border); border-left: 4px solid var(--brand); border-radius: 0.65em; background: var(--surface); }
+        .contacts h2 { margin: 0 0 0.4em; font-size: 1em; }
+        .contacts p { margin: 0.25em 0; color: var(--muted); }
+        .note { margin-top: 1.5em; color: #8f829b; font-size: 0.84em; }
+        [hidden] { display: none !important; }
+        @media (max-width: 960px) { .stats { grid-template-columns: repeat(3, 1fr); } .city-grid { grid-template-columns: repeat(2, 1fr); } }
+        @media (max-width: 620px) {
+            main { padding-top: 1.5em; }
+            .stats { grid-template-columns: repeat(2, 1fr); }
+            .city-grid { grid-template-columns: 1fr; }
+            .toolbar { align-items: stretch; flex-direction: column; }
+            th, td { padding: 0.75em; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <a class="back" href="/">← Voltar para todos os blocos</a>
+    <div class="brand-row"><span>Geofeed ${COMPANY_NAME}</span> <a class="admin-link" href="${ADMIN_BASE_URL}">Admin Center</a></div>
+
+    <header>
+        <p class="eyebrow">Detalhamento do bloco</p>
+        <h1 id="block-title">Carregando…</h1>
+        <p class="context" id="context"></p>
+        <div class="actions">
+            <a class="button" id="download" href="#" download>Baixar CSV original</a>
+            <button class="button secondary" id="copy" type="button">Copiar link do CSV</button>
+        </div>
+    </header>
+
+    <div class="loading" id="loading">Lendo e interpretando o arquivo CSV…</div>
+    <div class="error" id="error" hidden></div>
+
+    <div id="content" hidden>
+        <dl class="stats">
+            <div class="stat"><dt>Empresa</dt><dd id="company"></dd></div>
+            <div class="stat"><dt>ASN</dt><dd id="asn"></dd></div>
+            <div class="stat"><dt>Protocolo</dt><dd id="protocol"></dd></div>
+            <div class="stat"><dt>Registros</dt><dd id="records"></dd></div>
+            <div class="stat"><dt>Cidades</dt><dd id="cities"></dd></div>
+            <div class="stat"><dt>Atualizado em</dt><dd id="updated"></dd></div>
+        </dl>
+
+        <section>
+            <h2>Distribuição geográfica</h2>
+            <p class="section-description">Quantidade de prefixos publicados por localidade.</p>
+            <div class="city-grid" id="city-list"></div>
+        </section>
+
+        <section>
+            <h2>Conteúdo do geofeed</h2>
+            <p class="section-description">Visualização estruturada dos registros presentes no CSV original.</p>
+            <div class="toolbar">
+                <input class="search" id="search" type="search" placeholder="Pesquisar prefixo, cidade ou região…" aria-label="Pesquisar registros">
+                <span class="result-count" id="result-count" aria-live="polite"></span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Prefixo</th><th>País</th><th>Região</th><th>Cidade</th><th>CEP</th></tr></thead>
+                    <tbody id="records-body"></tbody>
+                </table>
+            </div>
+        </section>
+    </div>
+
+    <section class="contacts">
+        <h2>Contato</h2>
+        <p>NOC: <a href="mailto:${PUBLIC_CONTACT_EMAIL}">${PUBLIC_CONTACT_EMAIL}</a></p>
+        <p>Telefones: <a href="tel:08006012222">0800 601 2222</a> e <a href="tel:+554140404050">(41) 4040-4050</a></p>
+    </section>
+    <p class="note">Geofeed publicado conforme o formato definido na RFC 8805.</p>
+</main>
+
+<script>
+    (function () {
+        'use strict';
+
+        var feeds = {
+            geofeed168: { csv: 'geofeed168.csv', block: '168.90.48.0/22', company: '${COMPANY_NAME}', asn: 'AS265264', protocol: 'IPv4' },
+            geofeed187: { csv: 'geofeed187.csv', block: '187.95.128.0/22', company: '${COMPANY_NAME}', asn: 'AS265264', protocol: 'IPv4' },
+            geofeed2d28: { csv: 'geofeed2d28.csv', block: '2804:2d28::/32', company: '${COMPANY_NAME}', asn: 'AS265264', protocol: 'IPv6' },
+            geofeed200: { csv: 'geofeed200.csv', block: '200.169.64.0/21', company: 'DATACAST', asn: 'AS52976', protocol: 'IPv4' },
+            geofeed420: { csv: 'geofeed420.csv', block: '2804:420::/32', company: 'DATACAST', asn: 'AS52976', protocol: 'IPv6' },
+            geofeed865c: { csv: 'geofeed865c.csv', block: '2804:865c::/32', company: 'UNICORN', asn: 'AS272638', protocol: 'IPv6' }
+        };
+
+        var key = location.pathname.split('/').pop().replace(/\.html$/i, '');
+        var feed = null;
+        var loading = document.getElementById('loading');
+        var errorBox = document.getElementById('error');
+        var content = document.getElementById('content');
+
+        loadManifest();
+
+        function loadManifest() {
+            fetch('/geofeed-manifest.json', { cache: 'no-store' })
+                .then(function (response) {
+                    if (!response.ok) throw new Error('manifesto retornou HTTP ' + response.status + '.');
+                    return response.json();
+                })
+                .then(function (manifest) {
+                    var item = (manifest.feeds || []).find(function (candidate) {
+                        return String(candidate.filename || '').replace(/\.csv$/i, '') === key;
+                    });
+                    if (!item) throw new Error('Bloco de geofeed não reconhecido.');
+                    startFeed({
+                        csv: item.filename,
+                        block: item.block,
+                        company: item.company,
+                        asn: 'AS' + item.asn,
+                        protocol: 'IPv' + item.ip_version
+                    });
+                })
+                .catch(showError);
+        }
+
+        function startFeed(metadata) {
+            feed = metadata;
+            var csvPath = '/' + feed.csv;
+            var csvUrl = new URL(csvPath, location.origin).href;
+            document.title = feed.block + ' · Geofeed ${COMPANY_NAME}';
+            document.getElementById('block-title').textContent = feed.block;
+            document.getElementById('context').textContent = feed.company + ' · ' + feed.asn + ' · ' + feed.protocol;
+            document.getElementById('download').href = csvPath;
+
+            document.getElementById('copy').addEventListener('click', function () {
+                copyText(csvUrl, this);
+            });
+
+            fetch(csvPath, { cache: 'no-store' })
+                .then(function (response) {
+                    if (!response.ok) throw new Error('O arquivo CSV retornou HTTP ' + response.status + '.');
+                    return response.text();
+                })
+                .then(function (text) {
+                    var rows = parseCsv(text);
+                    if (!rows.length) throw new Error('O arquivo CSV não contém registros de geolocalização válidos.');
+                    renderSummary(feed, text, rows);
+                    renderCities(rows);
+                    setupRecords(rows);
+                    loading.hidden = true;
+                    content.hidden = false;
+                })
+                .catch(showError);
+        }
+
+        function showError(error) {
+            loading.hidden = true;
+            errorBox.hidden = false;
+            errorBox.textContent = 'Não foi possível carregar o geofeed: ' + error.message;
+        }
+
+        function parseCsv(text) {
+            return text.replace(/^\uFEFF/, '').split(/\r?\n/)
+                .map(function (line) { return line.trim(); })
+                .filter(function (line) { return line && line.charAt(0) !== '#'; })
+                .map(parseCsvLine)
+                .filter(function (fields) { return fields[0]; })
+                .map(function (fields) {
+                    return {
+                        prefix: fields[0] || '',
+                        country: fields[1] || '',
+                        region: fields[2] || '',
+                        city: fields[3] || '',
+                        postal: fields[4] || ''
+                    };
+                });
+        }
+
+        function parseCsvLine(line) {
+            var fields = [], current = '', quoted = false;
+            for (var i = 0; i < line.length; i += 1) {
+                var character = line.charAt(i);
+                if (character === '"') {
+                    if (quoted && line.charAt(i + 1) === '"') { current += '"'; i += 1; }
+                    else quoted = !quoted;
+                } else if (character === ',' && !quoted) {
+                    fields.push(current.trim()); current = '';
+                } else current += character;
+            }
+            fields.push(current.trim());
+            return fields;
+        }
+
+        function renderSummary(metadata, text, rows) {
+            var cities = new Set(rows.map(function (row) { return row.city; }).filter(Boolean));
+            var updatedMatch = text.match(/last updated \(rfc3339\):\s*([^;\r\n]+)/i);
+            document.getElementById('company').textContent = metadata.company;
+            document.getElementById('asn').textContent = metadata.asn;
+            document.getElementById('protocol').textContent = metadata.protocol;
+            document.getElementById('records').textContent = String(rows.length);
+            document.getElementById('cities').textContent = String(cities.size);
+            document.getElementById('updated').textContent = formatDate(updatedMatch ? updatedMatch[1].trim() : '');
+        }
+
+        function renderCities(rows) {
+            var grouped = new Map();
+            rows.forEach(function (row) {
+                var city = row.city || 'Não informado';
+                var region = regionName(row.region);
+                var mapKey = city + '|' + region;
+                grouped.set(mapKey, { city: city, region: region, count: (grouped.get(mapKey) || { count: 0 }).count + 1 });
+            });
+            var fragment = document.createDocumentFragment();
+            Array.from(grouped.values()).sort(function (a, b) { return b.count - a.count || a.city.localeCompare(b.city, 'pt-BR'); }).forEach(function (item) {
+                var card = document.createElement('div'); card.className = 'city-card';
+                var locationText = document.createElement('div');
+                var city = document.createElement('strong'); city.textContent = item.city;
+                var region = document.createElement('small'); region.textContent = item.region;
+                var count = document.createElement('span'); count.className = 'count'; count.textContent = String(item.count); count.title = item.count + ' prefixos publicados';
+                locationText.append(city, region); card.append(locationText, count); fragment.appendChild(card);
+            });
+            document.getElementById('city-list').replaceChildren(fragment);
+        }
+
+        function setupRecords(rows) {
+            var input = document.getElementById('search');
+            var body = document.getElementById('records-body');
+            var resultCount = document.getElementById('result-count');
+            function render() {
+                var query = input.value.trim().toLocaleLowerCase('pt-BR');
+                var visible = rows.filter(function (row) {
+                    return !query || [row.prefix, row.country, row.region, row.city, row.postal].join(' ').toLocaleLowerCase('pt-BR').includes(query);
+                });
+                var fragment = document.createDocumentFragment();
+                visible.forEach(function (row) {
+                    var tr = document.createElement('tr');
+                    [row.prefix, countryName(row.country), regionName(row.region), row.city || 'Não informado', row.postal || '—'].forEach(function (value) {
+                        var td = document.createElement('td'); td.textContent = value; tr.appendChild(td);
+                    });
+                    fragment.appendChild(tr);
+                });
+                body.replaceChildren(fragment);
+                resultCount.textContent = visible.length + ' de ' + rows.length + ' registros';
+            }
+            input.addEventListener('input', render);
+            render();
+        }
+
+        function countryName(code) { return code.toUpperCase() === 'BR' ? 'Brasil' : (code || 'Não informado'); }
+        function regionName(code) { return code.toUpperCase() === 'BR-PR' ? 'Paraná' : (code || 'Não informado'); }
+        function formatDate(value) {
+            if (!value) return 'Não informado';
+            var date = new Date(value);
+            return Number.isNaN(date.getTime()) ? value : date.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+        }
+        function copyText(value, button) {
+            var original = button.textContent;
+            var done = function () { button.textContent = 'Copiado!'; window.setTimeout(function () { button.textContent = original; }, 1600); };
+            if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(value).then(done).catch(function () { fallbackCopy(value); done(); });
+            else { fallbackCopy(value); done(); }
+        }
+        function fallbackCopy(value) {
+            var input = document.createElement('textarea'); input.value = value; input.style.position = 'fixed'; input.style.opacity = '0';
+            document.body.appendChild(input); input.select(); document.execCommand('copy'); input.remove();
+        }
+    }());
+</script>
+</body>
+</html>

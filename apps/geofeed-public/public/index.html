@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Arquivos públicos de geofeed da organização ${COMPANY_NAME}.">
+    <title>Geofeed ${COMPANY_NAME}</title>
+    <style>
+        :root {
+            color-scheme: dark;
+            --brand: #5619a3;
+            --brand-light: #9b6be1;
+            --background: #08060c;
+            --surface: #120e18;
+            --surface-light: #1a1323;
+            --border: #362744;
+            --text: #f7f3fb;
+            --muted: #bdb2c8;
+        }
+        * { box-sizing: border-box; }
+        html { min-height: 100%; background: var(--background); }
+        body {
+            min-height: 100vh;
+            margin: 0;
+            color: var(--text);
+            background:
+                radial-gradient(circle at 90% 0%, rgba(86, 25, 163, 0.24), transparent 32rem),
+                linear-gradient(180deg, #0d0913 0%, var(--background) 42%);
+            font-family: Tahoma, Verdana, Arial, sans-serif;
+            line-height: 1.5;
+        }
+        body::before {
+            content: "";
+            display: block;
+            height: 5px;
+            background: linear-gradient(90deg, var(--brand), #7c32c7 65%, var(--brand-light));
+        }
+        main {
+            width: min(76em, calc(100% - 2em));
+            margin: 0 auto;
+            padding: 4.5em 0 3em;
+        }
+        .hero { max-width: 52em; margin-bottom: 2.2em; }
+        .eyebrow {
+            margin: 0 0 0.65em;
+            color: var(--brand-light);
+            font-size: 0.78em;
+            font-weight: bold;
+            letter-spacing: 0.15em;
+            text-transform: uppercase;
+        }
+        h1 { margin: 0; font-size: clamp(2.3em, 7vw, 4.3em); line-height: 1.05; letter-spacing: -0.045em; }
+        .subtitle { margin: 0.7em 0 0; color: var(--brand-light); font-weight: bold; }
+        .description { max-width: 48em; margin: 1em 0 0; color: var(--muted); font-size: 1.05em; }
+        .download-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1em;
+            margin-bottom: 0.85em;
+        }
+        .selection-status { margin: 0; color: var(--muted); font-size: 0.9em; }
+        .admin-link { color: #e2c9ff; font-weight: bold; text-underline-offset: 0.2em; }
+        .admin-link:hover { color: #fff; }
+        .admin-link:focus-visible { outline: 2px solid var(--brand-light); outline-offset: 3px; }
+        .bulk-button {
+            padding: 0.65em 0.95em;
+            border: 1px solid #7743b8;
+            border-radius: 0.4em;
+            color: #fff;
+            background: var(--brand);
+            font: inherit;
+            font-size: 0.9em;
+            font-weight: bold;
+            white-space: nowrap;
+            cursor: pointer;
+        }
+        .bulk-button:hover { border-color: var(--brand-light); background: #6b24bb; }
+        .bulk-button:disabled { cursor: wait; opacity: 0.65; }
+        .protocol-tabs {
+            position: relative;
+            z-index: 1;
+            display: flex;
+            align-items: flex-end;
+            gap: 0.35em;
+            margin: 0 0 -1px 0.75em;
+        }
+        .protocol-tab {
+            padding: 0.6em 1em;
+            border: 1px solid var(--border);
+            border-bottom: 0;
+            border-radius: 0.55em 0.55em 0 0;
+            color: var(--muted);
+            background: #0e0a13;
+            font: inherit;
+            font-size: 0.86em;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        .protocol-tab:hover { color: var(--text); background: rgba(86, 25, 163, 0.18); }
+        .protocol-tab[aria-selected="true"] {
+            padding-top: 0.72em;
+            color: #f8f1ff;
+            border-color: #614078;
+            background: var(--surface-light);
+        }
+        .table-wrap {
+            overflow-x: auto;
+            border: 1px solid var(--border);
+            border-radius: 0.75em;
+            background: rgba(18, 14, 24, 0.92);
+            box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
+        }
+        table { width: 100%; border-collapse: collapse; }
+        th, td {
+            padding: 0.9em 1em;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+        }
+        th {
+            color: #d9c8ed;
+            background: var(--surface-light);
+            font-size: 0.75em;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        tbody tr:last-child td { border-bottom: 0; }
+        tbody tr:hover { background: rgba(86, 25, 163, 0.11); }
+        tbody tr[hidden] { display: none; }
+        td:nth-child(3), td:nth-child(4) { white-space: nowrap; }
+        a { color: #c59af5; font-weight: bold; text-underline-offset: 0.2em; }
+        a:hover { color: #e2c9ff; }
+        .select-cell { width: 3.25em; text-align: center; }
+        .row-select { width: 1.05em; height: 1.05em; accent-color: var(--brand-light); cursor: pointer; }
+        .block-cell { min-width: 12em; }
+        .actions-cell {
+            display: flex;
+            align-items: center;
+            gap: 0.5em;
+            min-width: 13.5em;
+        }
+        .small-button {
+            display: inline-block;
+            padding: 0.35em 0.7em;
+            border: 1px solid #7743b8;
+            border-radius: 0.35em;
+            color: #f9f4ff;
+            font: inherit;
+            font-size: 0.85em;
+            font-weight: normal;
+            line-height: 1.5;
+            white-space: nowrap;
+            cursor: pointer;
+            text-decoration: none;
+        }
+        .download-button { background: var(--brand); }
+        .copy-button { background: transparent; }
+        .small-button:hover { color: #fff; border-color: var(--brand-light); background: #6b24bb; }
+        button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--brand-light); outline-offset: 3px; }
+        .contacts {
+            margin-top: 1.5em;
+            padding: 1.25em 1.4em;
+            border: 1px solid var(--border);
+            border-left: 4px solid var(--brand);
+            border-radius: 0.65em;
+            background: var(--surface);
+        }
+        .company-files { margin-top: 1.5em; }
+        .company-files h2 { margin: 0 0 .75em; font-size: 1.15em; }
+        .company-list { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .75em; }
+        .company-file { display: flex; flex-direction: column; gap: .55em; padding: 1em; border: 1px solid var(--border); border-radius: .6em; background: var(--surface); }
+        .company-file strong { font-size: 1em; }
+        .company-file small { color: var(--muted); }
+        .company-file-actions { display: flex; flex-wrap: wrap; gap: .45em; }
+        .contacts h2 { margin: 0 0 0.45em; font-size: 1em; }
+        .contacts p { margin: 0.3em 0; color: var(--muted); }
+        .note { margin-top: 1.5em; color: #8f829b; font-size: 0.85em; }
+        @media (max-width: 700px) {
+            main { padding-top: 3em; }
+            .download-toolbar { align-items: stretch; flex-direction: column; }
+            .bulk-button { align-self: flex-start; }
+            th, td { padding: 0.8em; }
+            .company-list { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+<main>
+    <header class="hero">
+        <p class="eyebrow">Network Operations Center</p>
+        <h1>Geofeed ${COMPANY_NAME}</h1>
+        <p class="subtitle">Engenharia de redes - ${COMPANY_NAME}</p>
+        <p class="description">Arquivos públicos de geolocalização dos blocos IP. Clique sobre um bloco para consultar os dados em formato legível.</p>
+        <p><a class="admin-link" href="${ADMIN_BASE_URL}">Abrir Admin Center</a></p>
+    </header>
+
+    <div class="download-toolbar">
+        <p class="selection-status" id="selection-status" aria-live="polite">Nenhum bloco selecionado; o ZIP incluirá todos os arquivos.</p>
+        <button class="bulk-button" id="bulk-download" type="button">Baixar Tudo (.zip)</button>
+    </div>
+
+    <div class="protocol-tabs" role="tablist" aria-label="Filtrar blocos por protocolo">
+        <button class="protocol-tab" type="button" role="tab" aria-controls="geofeed-table" aria-selected="true" data-protocol-filter="all">IPv4+v6</button>
+        <button class="protocol-tab" type="button" role="tab" aria-controls="geofeed-table" aria-selected="false" data-protocol-filter="ipv4">IPv4</button>
+        <button class="protocol-tab" type="button" role="tab" aria-controls="geofeed-table" aria-selected="false" data-protocol-filter="ipv6">IPv6</button>
+    </div>
+
+    <div class="table-wrap">
+    <table id="geofeed-table">
+        <thead>
+            <tr>
+                <th class="select-cell"><span aria-label="Selecionar arquivos">✓</span></th>
+                <th>Empresa</th>
+                <th>ASN</th>
+                <th>Protocolo</th>
+                <th>Bloco</th>
+                <th>Ações</th>
+            </tr>
+        </thead>
+        <tbody id="geofeed-body">
+            <tr data-protocol="ipv4">
+                <td class="select-cell"><input class="row-select" type="checkbox" data-csv="geofeed168.csv" aria-label="Selecionar 168.90.48.0/22"></td>
+                <td>${COMPANY_NAME}</td>
+                <td>AS265264</td>
+                <td>IPv4</td>
+                <td class="block-cell"><a href="/geofeed168.html">168.90.48.0/22</a></td>
+                <td class="actions-cell"><a class="small-button download-button" href="/geofeed168.csv" download>Download</a><button class="small-button copy-button" type="button" data-url="${PUBLIC_BASE_URL}/geofeed168.csv">Copiar link</button></td>
+            </tr>
+            <tr data-protocol="ipv4">
+                <td class="select-cell"><input class="row-select" type="checkbox" data-csv="geofeed187.csv" aria-label="Selecionar 187.95.128.0/22"></td>
+                <td>${COMPANY_NAME}</td>
+                <td>AS265264</td>
+                <td>IPv4</td>
+                <td class="block-cell"><a href="/geofeed187.html">187.95.128.0/22</a></td>
+                <td class="actions-cell"><a class="small-button download-button" href="/geofeed187.csv" download>Download</a><button class="small-button copy-button" type="button" data-url="${PUBLIC_BASE_URL}/geofeed187.csv">Copiar link</button></td>
+            </tr>
+            <tr data-protocol="ipv6">
+                <td class="select-cell"><input class="row-select" type="checkbox" data-csv="geofeed2d28.csv" aria-label="Selecionar 2804:2d28::/32"></td>
+                <td>${COMPANY_NAME}</td>
+                <td>AS265264</td>
+                <td>IPv6</td>
+                <td class="block-cell"><a href="/geofeed2d28.html">2804:2d28::/32</a></td>
+                <td class="actions-cell"><a class="small-button download-button" href="/geofeed2d28.csv" download>Download</a><button class="small-button copy-button" type="button" data-url="${PUBLIC_BASE_URL}/geofeed2d28.csv">Copiar link</button></td>
+            </tr>
+            <tr data-protocol="ipv4">
+                <td class="select-cell"><input class="row-select" type="checkbox" data-csv="geofeed200.csv" aria-label="Selecionar 200.169.64.0/21"></td>
+                <td>DATACAST</td>
+                <td>AS52976</td>
+                <td>IPv4</td>
+                <td class="block-cell"><a href="/geofeed200.html">200.169.64.0/21</a></td>
+                <td class="actions-cell"><a class="small-button download-button" href="/geofeed200.csv" download>Download</a><button class="small-button copy-button" type="button" data-url="${PUBLIC_BASE_URL}/geofeed200.csv">Copiar link</button></td>
+            </tr>
+            <tr data-protocol="ipv6">
+                <td class="select-cell"><input class="row-select" type="checkbox" data-csv="geofeed420.csv" aria-label="Selecionar 2804:420::/32"></td>
+                <td>DATACAST</td>
+                <td>AS52976</td>
+                <td>IPv6</td>
+                <td class="block-cell"><a href="/geofeed420.html">2804:420::/32</a></td>
+                <td class="actions-cell"><a class="small-button download-button" href="/geofeed420.csv" download>Download</a><button class="small-button copy-button" type="button" data-url="${PUBLIC_BASE_URL}/geofeed420.csv">Copiar link</button></td>
+            </tr>
+            <tr data-protocol="ipv6">
+                <td class="select-cell"><input class="row-select" type="checkbox" data-csv="geofeed865c.csv" aria-label="Selecionar 2804:865c::/32"></td>
+                <td>UNICORN</td>
+                <td>AS272638</td>
+                <td>IPv6</td>
+                <td class="block-cell"><a href="/geofeed865c.html">2804:865c::/32</a></td>
+                <td class="actions-cell"><a class="small-button download-button" href="/geofeed865c.csv" download>Download</a><button class="small-button copy-button" type="button" data-url="${PUBLIC_BASE_URL}/geofeed865c.csv">Copiar link</button></td>
+            </tr>
+        </tbody>
+    </table>
+    </div>
+
+    <section class="company-files" aria-labelledby="company-files-title">
+        <h2 id="company-files-title">Arquivos consolidados por empresa</h2>
+        <p class="description">Baixe um único CSV contendo todos os blocos publicados de cada empresa ou copie o link permanente.</p>
+        <div class="company-list" id="company-files-list"><p class="note">Carregando arquivos consolidados…</p></div>
+    </section>
+
+    <section class="contacts">
+        <h2>Contato</h2>
+        <p>NOC: <a href="mailto:${PUBLIC_CONTACT_EMAIL}">${PUBLIC_CONTACT_EMAIL}</a></p>
+        <p>Telefones: <a href="tel:08006012222">0800 601 2222</a> e <a href="tel:+554140404050">(41) 4040-4050</a></p>
+    </section>
+
+    <p class="note">Geofeed publicado conforme o formato definido na RFC 8805.</p>
+
+    <script>
+        (function () {
+            'use strict';
+
+            var checkboxes = Array.from(document.querySelectorAll('.row-select'));
+            var bulkButton = document.getElementById('bulk-download');
+            var selectionStatus = document.getElementById('selection-status');
+            var protocolTabs = Array.from(document.querySelectorAll('.protocol-tab'));
+            var tableRows = Array.from(document.querySelectorAll('#geofeed-table tbody tr'));
+            var crcTable = createCrcTable();
+
+            document.querySelectorAll('.copy-button').forEach(function (button) {
+                button.addEventListener('click', function () { copyText(button.dataset.url, button); });
+            });
+            checkboxes.forEach(function (checkbox) { checkbox.addEventListener('change', updateBulkState); });
+            protocolTabs.forEach(function (tab, index) {
+                tab.addEventListener('click', function () { applyProtocolFilter(tab); });
+                tab.addEventListener('keydown', function (event) {
+                    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return;
+                    event.preventDefault();
+                    var direction = event.key === 'ArrowRight' ? 1 : -1;
+                    var next = protocolTabs[(index + direction + protocolTabs.length) % protocolTabs.length];
+                    next.focus();
+                    applyProtocolFilter(next);
+                });
+            });
+            bulkButton.addEventListener('click', downloadZip);
+            loadManifest();
+
+            function loadManifest() {
+                fetch('/geofeed-manifest.json', { cache: 'no-store' })
+                    .then(function (response) {
+                        if (!response.ok) throw new Error('manifesto retornou HTTP ' + response.status);
+                        return response.json();
+                    })
+                    .then(function (manifest) {
+                        renderManifest(Array.isArray(manifest.feeds) ? manifest.feeds : []);
+                        renderCompanyFiles(Array.isArray(manifest.companies) ? manifest.companies : []);
+                        checkboxes = Array.from(document.querySelectorAll('.row-select'));
+                        tableRows = Array.from(document.querySelectorAll('#geofeed-table tbody tr'));
+                        checkboxes.forEach(function (checkbox) { checkbox.addEventListener('change', updateBulkState); });
+                        document.querySelectorAll('.copy-button').forEach(function (button) {
+                            button.addEventListener('click', function () { copyText(button.dataset.url, button); });
+                        });
+                        updateBulkState();
+                    })
+                    .catch(function (error) {
+                        selectionStatus.textContent = 'Não foi possível carregar o manifesto: ' + error.message;
+                        bulkButton.disabled = true;
+                    });
+            }
+
+            function renderManifest(feeds) {
+                var body = document.getElementById('geofeed-body');
+                body.replaceChildren();
+                feeds.forEach(function (feed) {
+                    var filename = String(feed.filename || '');
+                    var htmlName = filename.replace(/\.csv$/i, '.html');
+                    var csvUrl = '/' + filename;
+                    var row = document.createElement('tr');
+                    row.dataset.protocol = Number(feed.ip_version) === 6 ? 'ipv6' : 'ipv4';
+                    var selectCell = document.createElement('td');
+                    selectCell.className = 'select-cell';
+                    var checkbox = document.createElement('input');
+                    checkbox.className = 'row-select'; checkbox.type = 'checkbox';
+                    checkbox.dataset.csv = filename;
+                    checkbox.setAttribute('aria-label', 'Selecionar ' + feed.block);
+                    selectCell.appendChild(checkbox);
+                    row.appendChild(selectCell);
+                    [feed.company, 'AS' + feed.asn, 'IPv' + feed.ip_version].forEach(function (value) {
+                        var cell = document.createElement('td'); cell.textContent = value; row.appendChild(cell);
+                    });
+                    var blockCell = document.createElement('td'); blockCell.className = 'block-cell';
+                    var blockLink = document.createElement('a'); blockLink.href = '/' + htmlName; blockLink.textContent = feed.block;
+                    blockCell.appendChild(blockLink); row.appendChild(blockCell);
+                    var actions = document.createElement('td'); actions.className = 'actions-cell';
+                    var download = document.createElement('a'); download.className = 'small-button download-button'; download.href = csvUrl; download.download = ''; download.textContent = 'Download';
+                    var copy = document.createElement('button'); copy.className = 'small-button copy-button'; copy.type = 'button'; copy.dataset.url = new URL(csvUrl, location.origin).href; copy.textContent = 'Copiar link';
+                    actions.append(download, copy); row.appendChild(actions); body.appendChild(row);
+                });
+            }
+
+            function renderCompanyFiles(companies) {
+                var container = document.getElementById('company-files-list');
+                container.replaceChildren();
+                if (!companies.length) {
+                    var empty = document.createElement('p'); empty.className = 'note'; empty.textContent = 'Nenhum arquivo consolidado publicado.'; container.appendChild(empty); return;
+                }
+                companies.forEach(function (company) {
+                    var card = document.createElement('article'); card.className = 'company-file';
+                    var title = document.createElement('strong'); title.textContent = company.company || 'Empresa';
+                    var details = document.createElement('small'); details.textContent = String(company.block_count || 0) + ' bloco(s) · ' + String(company.entry_count || 0) + ' entrada(s) · ' + String(company.filename || '');
+                    var actions = document.createElement('div'); actions.className = 'company-file-actions';
+                    var download = document.createElement('a'); download.className = 'small-button download-button'; download.href = '/' + company.filename; download.download = ''; download.textContent = 'Download CSV';
+                    var copy = document.createElement('button'); copy.className = 'small-button copy-button'; copy.type = 'button'; copy.dataset.url = new URL(company.csv_url || ('/' + company.filename), location.origin).href; copy.textContent = 'Copiar link';
+                    copy.addEventListener('click', function () { copyText(copy.dataset.url, copy); });
+                    actions.append(download, copy); card.append(title, details, actions); container.appendChild(card);
+                });
+            }
+
+            function applyProtocolFilter(activeTab) {
+                var filter = activeTab.dataset.protocolFilter;
+                protocolTabs.forEach(function (tab) { tab.setAttribute('aria-selected', String(tab === activeTab)); });
+                tableRows.forEach(function (row) { row.hidden = filter !== 'all' && row.dataset.protocol !== filter; });
+            }
+
+            function selectedFiles() {
+                return checkboxes.filter(function (checkbox) { return checkbox.checked; }).map(function (checkbox) {
+                    return { name: checkbox.dataset.csv, url: '/' + checkbox.dataset.csv };
+                });
+            }
+
+            function allFiles() {
+                return checkboxes.map(function (checkbox) { return { name: checkbox.dataset.csv, url: '/' + checkbox.dataset.csv }; });
+            }
+
+            function updateBulkState() {
+                var selected = selectedFiles();
+                if (selected.length) {
+                    bulkButton.textContent = 'Baixar Selecionados (' + selected.length + ') (.zip)';
+                    selectionStatus.textContent = selected.length + (selected.length === 1 ? ' bloco selecionado.' : ' blocos selecionados.');
+                } else {
+                    bulkButton.textContent = 'Baixar Tudo (.zip)';
+                    selectionStatus.textContent = 'Nenhum bloco selecionado; o ZIP incluirá todos os arquivos.';
+                }
+            }
+
+            async function downloadZip() {
+                var selected = selectedFiles();
+                var files = selected.length ? selected : allFiles();
+                var archiveName = selected.length ? 'geofeed-selecionados.zip' : 'geofeed-todos.zip';
+                var previousText = bulkButton.textContent;
+                bulkButton.disabled = true;
+                bulkButton.textContent = 'Preparando ZIP…';
+
+                try {
+                    var entries = await Promise.all(files.map(async function (file) {
+                        var response = await fetch(file.url, { cache: 'no-store' });
+                        if (!response.ok) throw new Error(file.name + ' retornou HTTP ' + response.status);
+                        return { name: file.name, data: new Uint8Array(await response.arrayBuffer()) };
+                    }));
+                    saveBlob(buildZip(entries), archiveName);
+                } catch (error) {
+                    window.alert('Não foi possível gerar o ZIP: ' + error.message);
+                } finally {
+                    bulkButton.disabled = false;
+                    bulkButton.textContent = previousText;
+                    updateBulkState();
+                }
+            }
+
+            function buildZip(entries) {
+                var encoder = new TextEncoder();
+                var localParts = [];
+                var centralParts = [];
+                var offset = 0;
+                var now = new Date();
+                var dosTime = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+                var dosDate = ((Math.max(1980, now.getFullYear()) - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+
+                entries.forEach(function (entry) {
+                    var name = encoder.encode(entry.name);
+                    var checksum = crc32(entry.data);
+                    var local = new Uint8Array(30 + name.length);
+                    var localView = new DataView(local.buffer);
+                    localView.setUint32(0, 0x04034b50, true);
+                    localView.setUint16(4, 20, true);
+                    localView.setUint16(6, 0x0800, true);
+                    localView.setUint16(8, 0, true);
+                    localView.setUint16(10, dosTime, true);
+                    localView.setUint16(12, dosDate, true);
+                    localView.setUint32(14, checksum, true);
+                    localView.setUint32(18, entry.data.length, true);
+                    localView.setUint32(22, entry.data.length, true);
+                    localView.setUint16(26, name.length, true);
+                    localView.setUint16(28, 0, true);
+                    local.set(name, 30);
+                    localParts.push(local, entry.data);
+
+                    var central = new Uint8Array(46 + name.length);
+                    var centralView = new DataView(central.buffer);
+                    centralView.setUint32(0, 0x02014b50, true);
+                    centralView.setUint16(4, 20, true);
+                    centralView.setUint16(6, 20, true);
+                    centralView.setUint16(8, 0x0800, true);
+                    centralView.setUint16(10, 0, true);
+                    centralView.setUint16(12, dosTime, true);
+                    centralView.setUint16(14, dosDate, true);
+                    centralView.setUint32(16, checksum, true);
+                    centralView.setUint32(20, entry.data.length, true);
+                    centralView.setUint32(24, entry.data.length, true);
+                    centralView.setUint16(28, name.length, true);
+                    centralView.setUint16(30, 0, true);
+                    centralView.setUint16(32, 0, true);
+                    centralView.setUint16(34, 0, true);
+                    centralView.setUint16(36, 0, true);
+                    centralView.setUint32(38, 0, true);
+                    centralView.setUint32(42, offset, true);
+                    central.set(name, 46);
+                    centralParts.push(central);
+                    offset += local.length + entry.data.length;
+                });
+
+                var centralSize = centralParts.reduce(function (total, part) { return total + part.length; }, 0);
+                var end = new Uint8Array(22);
+                var endView = new DataView(end.buffer);
+                endView.setUint32(0, 0x06054b50, true);
+                endView.setUint16(4, 0, true);
+                endView.setUint16(6, 0, true);
+                endView.setUint16(8, entries.length, true);
+                endView.setUint16(10, entries.length, true);
+                endView.setUint32(12, centralSize, true);
+                endView.setUint32(16, offset, true);
+                endView.setUint16(20, 0, true);
+                return new Blob(localParts.concat(centralParts, [end]), { type: 'application/zip' });
+            }
+
+            function createCrcTable() {
+                var table = new Uint32Array(256);
+                for (var n = 0; n < 256; n += 1) {
+                    var value = n;
+                    for (var k = 0; k < 8; k += 1) value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+                    table[n] = value >>> 0;
+                }
+                return table;
+            }
+
+            function crc32(data) {
+                var crc = 0xffffffff;
+                for (var i = 0; i < data.length; i += 1) crc = crcTable[(crc ^ data[i]) & 0xff] ^ (crc >>> 8);
+                return (crc ^ 0xffffffff) >>> 0;
+            }
+
+            function saveBlob(blob, filename) {
+                var url = URL.createObjectURL(blob);
+                var link = document.createElement('a');
+                link.href = url; link.download = filename; link.hidden = true;
+                document.body.appendChild(link); link.click(); link.remove();
+                window.setTimeout(function () { URL.revokeObjectURL(url); }, 5000);
+            }
+
+            function copyText(value, button) {
+                var original = button.textContent;
+                var done = function () { button.textContent = 'Copiado!'; window.setTimeout(function () { button.textContent = original; }, 1600); };
+                if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(value).then(done).catch(function () { fallbackCopy(value); done(); });
+                else { fallbackCopy(value); done(); }
+            }
+
+            function fallbackCopy(value) {
+                var input = document.createElement('textarea');
+                input.value = value; input.style.position = 'fixed'; input.style.opacity = '0';
+                document.body.appendChild(input); input.select(); document.execCommand('copy'); input.remove();
+            }
+        }());
+    </script>
+</main>
+</body>
+</html>

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Publicação v{{ publication.version }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Histórico</p><h1>Publicação v{{ publication.version }}</h1><p class="muted">{{ publication.summary }}</p></div>{% if current_user.is_admin() %}<form method="post" action="{{ url_for('panel.history_restore', publication_id=publication.id) }}" data-confirm="Restaurar esta versão como rascunho de trabalho?"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-secondary" type="submit">Restaurar como rascunho</button></form>{% endif %}</div>
+<section class="card"><dl class="details"><div><dt>Responsável</dt><dd>{{ publication.published_by.email }}</dd></div><div><dt>Data</dt><dd>{{ publication.published_at }}</dd></div><div><dt>Hash</dt><dd class="mono hash">{{ publication.snapshot_hash }}</dd></div><div><dt>Backup</dt><dd>Arquivo protegido no servidor</dd></div></dl></section><section class="card"><h2>Diferenças da versão anterior</h2><pre class="diff">{{ diff or 'Primeira versão ou nenhuma diferença textual.' }}</pre></section>
+{% endblock %}

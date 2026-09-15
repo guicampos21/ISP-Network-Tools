@@ -1,0 +1,62 @@
+ISP Network Health
+
+Uso:
+  ./inh [ALVO] [--workers N] [--boost] [--approach conservative|aggressive] [--report-type 2] [--help]
+
+Entradas suportadas:
+  dominio                  Ex.: exemplo.com
+  IPv4 unico               Ex.: 203.0.113.25
+  bloco CIDR IPv4          Ex.: 203.0.113.0/28
+  ASN no formato ASxxxx    Ex.: AS15169
+
+Comportamento:
+  - Ao informar um dominio, a ferramenta consulta o proprio dominio e os IPv4 resolvidos.
+  - Ao informar um IPv4 unico, a ferramenta consulta as DNSBLs para esse endereco.
+  - Ao informar um CIDR IPv4, a ferramenta expande o bloco e verifica todos os IPs.
+  - Ao informar um ASN, a ferramenta consulta:
+      * reputacao ASN-DROP da Spamhaus
+      * prefixos IPv4 anunciados pelo ASN
+      * conectividade BGP resumida para a tela de Upstreams
+      * DNSBLs para os IPs dos prefixos anunciados
+
+Opcoes:
+  --workers N
+      Define a quantidade maxima de consultas paralelas.
+      Se omitido ou igual a 0, a ferramenta escolhe um valor automatico.
+
+  --boost
+      Ativa o modo turbo.
+      Aumenta agressivamente o paralelismo e a fila interna de consultas,
+      priorizando velocidade em troca de maior consumo de CPU, RAM e rede.
+      Se omitido, a ferramenta pode perguntar interativamente se deseja usar boost.
+
+  --approach conservative|aggressive
+      Define a estrategia de consulta.
+      Conservadora: usa apenas as fontes mais criticas e confiaveis.
+      Agressiva: usa todas as fontes disponiveis na ferramenta.
+
+  --report-type 1|2
+      Mantido por compatibilidade.
+      Esta versao sempre gera o relatorio completo HTML em quatro partes.
+
+  --help
+      Exibe esta ajuda completa.
+
+Saidas:
+  - Interface interativa no terminal com progresso, upstreams e eventos recentes.
+  - Relatorio completo: artefatos gerados a partir do fluxo completo da ferramenta.
+  - Log completo opcional ao final da execucao.
+
+Observacoes operacionais:
+  - A ferramenta trabalha apenas com IPv4 e CIDR IPv4.
+  - ASN muito grande pode ser bloqueado por limite operacional para evitar varreduras excessivas.
+  - A velocidade real depende de DNS, rede e resposta das blacklists consultadas.
+
+Exemplos:
+  ./inh exemplo.com
+  ./inh 203.0.113.25
+  ./inh 203.0.113.0/28 --workers 48
+  ./inh AS15169 --workers 64
+  ./inh AS15169 --boost
+  ./inh 203.0.113.0/24 --boost --workers 96
+  ./inh 203.0.113.0/24 --approach aggressive

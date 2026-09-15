@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar empresa' if company else 'Nova empresa' }}{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Empresas</p><h1>{{ 'Editar empresa' if company else 'Nova empresa' }}</h1></div><a class="button button-secondary" href="{{ url_for('panel.companies') }}">Voltar</a></div>
+<form class="card form-card" method="post">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-grid"><label><span>Nome *</span><input name="name" maxlength="120" required value="{{ request.form.get('name', company.name if company else '') }}"></label><label><span>ASN padrão *</span><input name="default_asn" inputmode="numeric" required value="{{ request.form.get('default_asn', company.default_asn if company else '') }}"></label><label class="full"><span>E-mail de contato</span><input type="email" name="contact_email" maxlength="254" value="{{ request.form.get('contact_email', company.contact_email if company else '') }}"></label>{% if company %}<label class="check"><input type="checkbox" name="active" {% if company.active %}checked{% endif %}><span>Empresa ativa</span></label>{% endif %}</div>
+  <div class="form-actions"><button class="button button-primary" type="submit">Salvar</button></div>
+</form>
+{% endblock %}

@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Revisão de blocos{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Qualidade dos dados</p><h1>Revisão de blocos</h1><p class="muted">Verificação de alinhamento CIDR e formato de sub-redes.</p></div><a class="button button-secondary" href="{{ url_for('panel.blocks') }}">Voltar aos blocos</a></div>
+<section class="card table-card"><div class="table-wrap"><table><thead><tr><th>Bloco</th><th>Empresa</th><th>Problemas encontrados</th></tr></thead><tbody>{% for block, issues in reviewed %}<tr><td class="mono"><span class="review-warning-static">⚠</span> {{ block.cidr }}</td><td>{{ block.company.name }}</td><td><ul class="review-issues">{% for issue in issues %}<li>{{ issue }}</li>{% endfor %}</ul></td></tr>{% else %}<tr><td colspan="3">Nenhuma inconsistência de alinhamento encontrada.</td></tr>{% endfor %}</tbody></table></div></section>
+{% endblock %}
