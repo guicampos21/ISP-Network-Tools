@@ -4,6 +4,7 @@
   {% from "_application_icon.html" import app_icon %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0910">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>{% block title %}Admin Center{% endblock %} · {{ portal_branding.company_name }}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260915-suite-launcher') }}">
@@ -32,16 +33,16 @@
           </label>
           <div class="launcher-grid" data-launcher-grid>
           {% for application in suite_applications if application.available %}
-            <a class="launcher-item" data-launcher-item data-app-label="{{ application.name }} {{ application.description }}" href="{{ application.url }}">
+            <a class="launcher-item" data-launcher-item data-app-label="{{ application.name }}" href="{{ application.url }}">
               {{ app_icon(application.code) }}
-              <span class="launcher-item-copy"><strong>{{ application.name }}</strong><small>{{ application.description }}</small></span>
+              <span class="launcher-item-copy"><strong>{{ application.name }}</strong></span>
             </a>
           {% endfor %}
             <p class="launcher-empty" data-launcher-empty role="status" aria-live="polite" hidden>Nenhuma aplicação encontrada.</p>
           </div>
         </div>
       </details>
-      <a class="brand" href="{{ url_for('panel.settings') if current_user.is_super_admin() else url_for('panel.dashboard') }}">
+      <a class="brand" href="{{ url_for('panel.dashboard') }}">
         <span class="brand-mark" aria-hidden="true">I</span>
         <span><strong>Admin Center</strong><small>{{ portal_branding.suite_name }}</small></span>
       </a>

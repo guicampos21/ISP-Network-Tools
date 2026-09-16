@@ -27,6 +27,9 @@ class Config:
     ADMIN_BASE_URL = os.getenv("ADMIN_BASE_URL", "http://admin-center.localhost").rstrip("/")
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://geofeed.localhost").rstrip("/")
     HEALTH_BASE_URL = os.getenv("HEALTH_BASE_URL", "http://network-health.localhost").rstrip("/")
+    HEALTH_INTERNAL_BASE_URL = os.getenv(
+        "HEALTH_INTERNAL_BASE_URL", "http://isp-network-health:8090"
+    ).rstrip("/")
     DATABASE_HOST = os.getenv("DATABASE_HOST", "").strip()
     DATABASE_PORT = os.getenv("DATABASE_PORT", "5432").strip()
     DATABASE_NAME = os.getenv("DATABASE_NAME", "isp_core").strip()

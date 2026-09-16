@@ -111,6 +111,22 @@ def list_scans(subject: str, limit: int = 40) -> list[dict[str, Any]]:
         )
 
 
+def list_active_scans_for_admin(limit: int = 100) -> list[dict[str, Any]]:
+    """Return only queued/running scans for the private Admin Center feed."""
+    with connect() as connection:
+        return list(
+            connection.execute(
+                """
+                SELECT * FROM health_scans
+                WHERE status IN ('queued', 'running')
+                ORDER BY created_at ASC
+                LIMIT %s
+                """,
+                (max(1, min(limit, 100)),),
+            ).fetchall()
+        )
+
+
 def list_results(scan_id: int) -> list[dict[str, Any]]:
     with connect() as connection:
         return list(

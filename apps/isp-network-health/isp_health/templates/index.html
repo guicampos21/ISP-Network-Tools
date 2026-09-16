@@ -3,16 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b0910">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>ISP Network Health</title>
   {% if selected_scan and selected_scan.status in ['queued', 'running'] %}<meta http-equiv="refresh" content="10">{% endif %}
   <link rel="stylesheet" href="{{ url_for('static', filename='health.css') }}">
+  <script src="{{ url_for('static', filename='health.js') }}" defer></script>
 </head>
 <body>
   <main class="shell">
     <header class="topbar">
-      <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">H</span><span><strong>ISP Network Health</strong><small>{{ health_user.name or health_user.email }}</small></span></a>
-      <div class="form-actions"><a class="button" href="{{ admin_base_url }}">Admin Center</a><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button" type="submit">Sair</button></form></div>
+      <div class="header-start">
+        <details class="app-launcher" data-app-launcher>
+          <summary class="launcher-trigger" data-launcher-trigger aria-label="Abrir aplicações" aria-controls="suite-launcher-panel" aria-expanded="false" title="Aplicações"><span class="launcher-grid-icon" aria-hidden="true">{% for _ in range(9) %}<i></i>{% endfor %}</span></summary>
+          <div class="launcher-panel" id="suite-launcher-panel" role="dialog" aria-label="Aplicações da suíte">
+            <div class="launcher-heading"><div><span class="launcher-overline">{{ suite_name }}</span><strong>Aplicações</strong></div><button class="launcher-close" type="button" data-launcher-close aria-label="Fechar aplicações">×</button></div>
+            <label class="launcher-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><span class="sr-only">Pesquisar aplicações</span><input type="search" data-launcher-search placeholder="Localizar aplicações da suíte" autocomplete="off"></label>
+            <div class="launcher-grid" data-launcher-grid>
+            {% for application in application_links %}<a class="launcher-item" data-launcher-item data-app-label="{{ application.name }}" href="{{ application.url }}"><span class="app-icon app-icon-{{ application.code|replace('_', '-') }}" aria-hidden="true">{% if application.code == 'geofeed_public' %}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M4 12h16M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8S9.8 6.3 12 4Z"></path></svg>{% elif application.code == 'admin_center' %}<svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-2.7 8-7 10-4.3-2-7-5.5-7-10V6l7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg>{% else %}<svg viewBox="0 0 24 24"><path d="M4 15.5a8 8 0 0 1 16 0M7 12.5a5 5 0 0 1 10 0M10 9.5a2 2 0 0 1 4 0M12 18v.1"></path></svg>{% endif %}</span><span class="launcher-item-copy"><strong>{{ application.name }}</strong></span></a>{% endfor %}
+              <p class="launcher-empty" data-launcher-empty role="status" aria-live="polite" hidden>Nenhuma aplicação encontrada.</p>
+            </div>
+          </div>
+        </details>
+        <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">H</span><span><strong>ISP Network Health</strong><small>{{ health_user.name or health_user.email }}</small></span></a>
+      </div>
+      <div class="form-actions"><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button" type="submit">Sair</button></form></div>
     </header>
     <section class="heading">
       <div><p class="eyebrow">Diagnóstico operacional</p><h1>Saúde da sua rede</h1><p class="muted">Analise a reputação de domínios, IPv4, blocos CIDR e ASNs com execução em segundo plano.</p></div>

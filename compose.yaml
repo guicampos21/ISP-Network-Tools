@@ -68,6 +68,7 @@ services:
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
       HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      HEALTH_INTERNAL_BASE_URL: ${HEALTH_INTERNAL_BASE_URL:-http://isp-network-health:8090}
       TRUSTED_HOSTS: ${TRUSTED_HOSTS:-admin-center.localhost,localhost,127.0.0.1}
       LOCAL_AUTH_ENABLED: ${LOCAL_AUTH_ENABLED:-true}
       DEV_AUTH: ${DEV_AUTH:-false}
@@ -168,6 +169,7 @@ services:
       SUITE_NAME: ${SUITE_NAME:-ISP Network Tools}
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
       PUBLIC_CONTACT_EMAIL: ${PUBLIC_CONTACT_EMAIL:-noc@example.invalid}
     volumes:
       - geofeed_publish:/usr/share/nginx/blocos:ro
@@ -200,8 +202,10 @@ services:
       INH_MAX_CIDR_IPS: ${INH_MAX_CIDR_IPS:-0}
       HEALTH_WORKER_MAX_WORKERS: ${HEALTH_WORKER_MAX_WORKERS:-32}
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
       HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
-      TRUSTED_HOSTS: ${HEALTH_TRUSTED_HOSTS:-network-health.localhost,localhost,127.0.0.1}
+      SUITE_NAME: ${SUITE_NAME:-ISP Network Tools}
+      TRUSTED_HOSTS: ${HEALTH_TRUSTED_HOSTS:-network-health.localhost,isp-network-health,localhost,127.0.0.1}
       DEV_AUTH: ${DEV_AUTH:-false}
     secrets:
       - health_secret_key

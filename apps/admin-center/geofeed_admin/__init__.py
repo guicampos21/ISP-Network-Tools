@@ -4,6 +4,7 @@ import os
 import json
 import re
 import base64
+from datetime import timedelta
 from pathlib import Path
 
 from authlib.integrations.flask_client import OAuth
@@ -17,7 +18,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import Config
-from .models import Application, InAppNotification, JobFunction, Role, Sector, User, db
+from .models import Application, InAppNotification, JobFunction, Role, Sector, User, db, utcnow
 from .avatar import AVATAR_PRESET_CONFIGS, AVATAR_PRESETS, avatar_svg, dicebear_catalog
 from .security import current_user, restore_remembered_session
 
@@ -90,6 +91,11 @@ def create_app(test_config: dict | None = None) -> Flask:
             db.session.commit()
         except IntegrityError:
             db.session.rollback()
+        if str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).startswith("postgresql"):
+            with db.engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ")
+                )
         columns = {column["name"] for column in inspect(db.engine).get_columns("users")}
         additions = {
             "password_hash": "VARCHAR(255)",
@@ -111,6 +117,7 @@ def create_app(test_config: dict | None = None) -> Flask:
             "avatar_config": "TEXT NOT NULL DEFAULT '{}'",
             "deleted_at": "DATETIME",
             "deleted_by_id": "INTEGER REFERENCES users(id)",
+            "last_seen_at": "DATETIME",
         }
         for name, definition in additions.items():
             if name in columns:
@@ -130,6 +137,9 @@ def create_app(test_config: dict | None = None) -> Flask:
             )
             connection.execute(
                 text("CREATE INDEX IF NOT EXISTS ix_users_deleted_at ON users(deleted_at)")
+            )
+            connection.execute(
+                text("CREATE INDEX IF NOT EXISTS ix_users_last_seen_at ON users(last_seen_at)")
             )
         # Usernames are reserved for local authentication. External identities
         # are identified by their provider e-mail and must not get a local login.
@@ -253,6 +263,22 @@ def create_app(test_config: dict | None = None) -> Flask:
     def restore_session_from_cookie():
         restore_remembered_session()
 
+    @app.before_request
+    def track_user_presence():
+        """Keep a lightweight presence signal for the operational dashboard."""
+        if not request.endpoint or not request.endpoint.startswith("panel."):
+            return
+        user = current_user()
+        if not user:
+            return
+        now = utcnow()
+        last_seen = user.last_seen_at
+        if last_seen is not None and last_seen.tzinfo is None:
+            last_seen = last_seen.replace(tzinfo=now.tzinfo)
+        if last_seen is None or now - last_seen >= timedelta(seconds=45):
+            user.last_seen_at = now
+            db.session.commit()
+
     from .commands import register_commands
 
     register_commands(app)
@@ -306,7 +332,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "description": application.description,
                     "url": {
                         "geofeed_public": app.config.get("PUBLIC_BASE_URL"),
-                        "admin_center": url_for("panel.settings") if user and user.is_super_admin() else app.config.get("ADMIN_BASE_URL"),
+                        "admin_center": url_for("panel.dashboard") if user else app.config.get("ADMIN_BASE_URL"),
                         "isp_network_health": url_for("panel.issue_sso", target="isp_network_health") if user else app.config.get("HEALTH_BASE_URL"),
                     }.get(application.code, application.url),
                     "available": (

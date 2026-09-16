@@ -31,7 +31,9 @@ def app_config() -> dict[str, object]:
         "SECRET_KEY": read_secret("SECRET_KEY"),
         "SSO_SIGNING_SECRET": read_secret("SSO_SIGNING_SECRET"),
         "APP_ENV": environment,
+        "SUITE_NAME": os.getenv("SUITE_NAME", "ISP Network Tools").strip()[:120],
         "ADMIN_BASE_URL": os.getenv("ADMIN_BASE_URL", "http://admin-center.localhost").rstrip("/"),
+        "PUBLIC_BASE_URL": os.getenv("PUBLIC_BASE_URL", "http://geofeed.localhost").rstrip("/"),
         "HEALTH_BASE_URL": os.getenv("HEALTH_BASE_URL", "http://network-health.localhost").rstrip("/"),
         "REDIS_URL": os.getenv("REDIS_URL", "redis://redis:6379/1"),
         "TRUSTED_HOSTS": [

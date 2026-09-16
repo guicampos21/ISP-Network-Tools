@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#0b0910">
     <meta name="description" content="Arquivos públicos de geofeed da organização ${COMPANY_NAME}.">
     <title>Geofeed ${COMPANY_NAME}</title>
     <style>
@@ -10,12 +11,13 @@
             color-scheme: dark;
             --brand: #5619a3;
             --brand-light: #9b6be1;
-            --background: #08060c;
-            --surface: #120e18;
-            --surface-light: #1a1323;
-            --border: #362744;
+            --background: #0b0910;
+            --surface: #17131f;
+            --surface-light: #241b31;
+            --border: #58456b;
+            --border-strong: #7a6090;
             --text: #f7f3fb;
-            --muted: #bdb2c8;
+            --muted: #c7bdd2;
         }
         * { box-sizing: border-box; }
         html { min-height: 100%; background: var(--background); }
@@ -25,7 +27,7 @@
             color: var(--text);
             background:
                 radial-gradient(circle at 90% 0%, rgba(86, 25, 163, 0.24), transparent 32rem),
-                linear-gradient(180deg, #0d0913 0%, var(--background) 42%);
+                linear-gradient(180deg, #12101a 0%, var(--background) 42%);
             font-family: Tahoma, Verdana, Arial, sans-serif;
             line-height: 1.5;
         }
@@ -38,8 +40,41 @@
         main {
             width: min(76em, calc(100% - 2em));
             margin: 0 auto;
-            padding: 4.5em 0 3em;
+            padding: 1.25em 0 3em;
         }
+        .site-header { display: flex; align-items: center; gap: 1em; min-height: 4.6em; margin-bottom: 2.5em; padding: .7em 0; border-bottom: 1px solid var(--border); }
+        .brand { display: inline-flex; align-items: center; gap: .7em; color: var(--text); text-decoration: none; }
+        .brand-mark { display: grid; place-items: center; width: 2.35em; height: 2.35em; border-radius: .6em; color: #fff; background: linear-gradient(145deg,#9554d8,#4d218f); font-weight: bold; }
+        .brand strong,.brand small { display: block; line-height: 1.15; }
+        .brand small { margin-top: .2em; color: var(--muted); font-size: .68em; letter-spacing: .1em; text-transform: uppercase; }
+        .app-launcher { position: relative; }
+        .launcher-trigger { display: grid; place-items: center; width: 2.65em; height: 2.65em; padding: .55em; border: 1px solid transparent; border-radius: .55em; color: var(--muted); background: transparent; cursor: pointer; list-style: none; }
+        .launcher-trigger::-webkit-details-marker { display: none; }
+        .launcher-trigger:hover,.launcher-trigger:focus-visible,.app-launcher[open] .launcher-trigger { border-color: var(--border); color: var(--text); background: var(--surface-light); }
+        .launcher-grid-icon { display: grid; grid-template-columns: repeat(3,.26em); grid-template-rows: repeat(3,.26em); gap: .22em; }
+        .launcher-grid-icon i { display: block; border-radius: 50%; background: currentColor; }
+        .launcher-panel { position: absolute; z-index: 20; top: calc(100% + .65em); left: 0; width: min(31em,calc(100vw - 2em)); padding: 1em; border: 1px solid var(--border-strong); border-radius: .65em; background: var(--surface-light); box-shadow: 0 1.5em 3.5em #0000007a; }
+        .launcher-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1em; padding: .15em .15em .8em; border-bottom: 1px solid var(--border); }
+        .launcher-heading div { display: grid; gap: .08em; }
+        .launcher-heading strong { font-size: 1.05em; }
+        .launcher-overline { color: var(--brand-light); font-size: .68em; letter-spacing: .08em; text-transform: uppercase; }
+        .launcher-close { display: grid; place-items: center; width: 1.8em; height: 1.8em; border: 1px solid transparent; border-radius: .35em; color: var(--muted); background: transparent; font: inherit; font-size: 1.35em; line-height: 1; cursor: pointer; }
+        .launcher-close:hover,.launcher-close:focus-visible { border-color: var(--border-strong); background: var(--border); }
+        .launcher-search { position: relative; display: flex; align-items: center; margin: .85em 0 .7em; }
+        .launcher-search svg { position: absolute; left: .75em; width: 1em; height: 1em; fill: none; stroke: var(--muted); stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.8; pointer-events: none; }
+        .launcher-search input { width: 100%; min-height: 2.3em; padding: .45em .7em .45em 2.25em; border: 1px solid var(--border-strong); border-radius: .35em; color: var(--text); background: var(--background); font: inherit; }
+        .launcher-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .25em; }
+        .launcher-item { display: flex; min-height: 6em; flex-direction: column; align-items: center; gap: .48em; padding: .7em .35em .55em; border: 1px solid transparent; border-radius: .4em; color: var(--text); text-align: center; text-decoration: none; }
+        .launcher-item:hover,.launcher-item:focus-visible { border-color: var(--border-strong); background: var(--border); }
+        .launcher-item-copy { display: block; width: 100%; overflow: hidden; }
+        .launcher-item strong { display: block; overflow: hidden; font-size: .76em; text-overflow: ellipsis; white-space: nowrap; }
+        .launcher-empty { grid-column: 1/-1; margin: 1em .3em .5em; color: var(--muted); font-size: .8em; text-align: center; }
+        .app-icon { display: grid; place-items: center; width: 2.8em; height: 2.8em; border: 1px solid #ffffff33; border-radius: .8em; color: #fff; box-shadow: 0 .35em .8em #0000003d; }
+        .app-icon svg { width: 1.8em; height: 1.8em; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.2; }
+        .app-icon-geofeed { background: linear-gradient(145deg,#2b8eb1,#15517e); }
+        .app-icon-admin { background: linear-gradient(145deg,#9554d8,#4d218f); }
+        .app-icon-health { background: linear-gradient(145deg,#1ea77e,#12625d); }
+        .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
         .hero { max-width: 52em; margin-bottom: 2.2em; }
         .eyebrow {
             margin: 0 0 0.65em;
@@ -108,7 +143,7 @@
             overflow-x: auto;
             border: 1px solid var(--border);
             border-radius: 0.75em;
-            background: rgba(18, 14, 24, 0.92);
+            background: var(--surface);
             box-shadow: 0 24px 60px rgba(0, 0, 0, 0.22);
         }
         table { width: 100%; border-collapse: collapse; }
@@ -174,9 +209,11 @@
         .company-file-actions { display: flex; flex-wrap: wrap; gap: .45em; }
         .contacts h2 { margin: 0 0 0.45em; font-size: 1em; }
         .contacts p { margin: 0.3em 0; color: var(--muted); }
-        .note { margin-top: 1.5em; color: #8f829b; font-size: 0.85em; }
+        .note { margin-top: 1.5em; color: #a99bb4; font-size: 0.85em; }
+        .launcher-item[hidden] { display: none; }
         @media (max-width: 700px) {
-            main { padding-top: 3em; }
+            main { padding-top: 1.5em; }
+            .launcher-panel { max-height: calc(100vh - 7em); overflow-y: auto; }
             .download-toolbar { align-items: stretch; flex-direction: column; }
             .bulk-button { align-self: flex-start; }
             th, td { padding: 0.8em; }
@@ -186,12 +223,27 @@
 </head>
 <body>
 <main>
+    <header class="site-header">
+        <details class="app-launcher" data-app-launcher>
+            <summary class="launcher-trigger" data-launcher-trigger aria-label="Abrir aplicações" aria-controls="suite-launcher-panel" aria-expanded="false" title="Aplicações"><span class="launcher-grid-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></summary>
+            <div class="launcher-panel" id="suite-launcher-panel" role="dialog" aria-label="Aplicações da suíte">
+                <div class="launcher-heading"><div><span class="launcher-overline">${SUITE_NAME}</span><strong>Aplicações</strong></div><button class="launcher-close" type="button" data-launcher-close aria-label="Fechar aplicações">×</button></div>
+                <label class="launcher-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><span class="sr-only">Pesquisar aplicações</span><input type="search" data-launcher-search placeholder="Localizar aplicações da suíte" autocomplete="off"></label>
+                <div class="launcher-grid" data-launcher-grid>
+                    <a class="launcher-item" data-launcher-item data-app-label="Geofeed público" href="${PUBLIC_BASE_URL}"><span class="app-icon app-icon-geofeed" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M4 12h16M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8S9.8 6.3 12 4Z"></path></svg></span><span class="launcher-item-copy"><strong>Geofeed público</strong></span></a>
+                    <a class="launcher-item" data-launcher-item data-app-label="Admin Center" href="${ADMIN_BASE_URL}"><span class="app-icon app-icon-admin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-2.7 8-7 10-4.3-2-7-5.5-7-10V6l7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg></span><span class="launcher-item-copy"><strong>Admin Center</strong></span></a>
+                    <a class="launcher-item" data-launcher-item data-app-label="ISP Network Health" href="${HEALTH_BASE_URL}"><span class="app-icon app-icon-health" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 15.5a8 8 0 0 1 16 0M7 12.5a5 5 0 0 1 10 0M10 9.5a2 2 0 0 1 4 0M12 18v.1"></path></svg></span><span class="launcher-item-copy"><strong>ISP Network Health</strong></span></a>
+                    <p class="launcher-empty" data-launcher-empty role="status" aria-live="polite" hidden>Nenhuma aplicação encontrada.</p>
+                </div>
+            </div>
+        </details>
+        <a class="brand" href="${PUBLIC_BASE_URL}"><span class="brand-mark" aria-hidden="true">G</span><span><strong>Geofeed público</strong><small>${SUITE_NAME}</small></span></a>
+    </header>
     <header class="hero">
         <p class="eyebrow">Network Operations Center</p>
         <h1>Geofeed ${COMPANY_NAME}</h1>
         <p class="subtitle">Engenharia de redes - ${COMPANY_NAME}</p>
         <p class="description">Arquivos públicos de geolocalização dos blocos IP. Clique sobre um bloco para consultar os dados em formato legível.</p>
-        <p><a class="admin-link" href="${ADMIN_BASE_URL}">Abrir Admin Center</a></p>
     </header>
 
     <div class="download-toolbar">
@@ -540,5 +592,6 @@
         }());
     </script>
 </main>
+<script src="/app-launcher.js" defer></script>
 </body>
 </html>

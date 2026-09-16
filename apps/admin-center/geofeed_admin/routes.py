@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import hmac
 import ipaddress
 import json
 import re
@@ -8,7 +10,7 @@ import secrets
 import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 from zoneinfo import ZoneInfo, available_timezones
 
 from email_validator import EmailNotValidError, validate_email
@@ -28,6 +30,7 @@ from flask import (
 from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
+import requests
 
 from . import limiter, oauth
 from .avatar import (
@@ -260,19 +263,68 @@ def _require_change_confirmation() -> None:
         raise ValueError("Revise o resumo das alterações e confirme antes de prosseguir.")
 
 
-def _latest_health_by_target(limit: int | None = None) -> list[HealthCheck]:
-    """Return only the most recent check for each public file."""
-    latest: list[HealthCheck] = []
+def _latest_scanned_blocks(limit: int = 6) -> list[dict]:
+    """Join recent public-file checks with the block catalog for a compact summary."""
+    blocks = {block.filename: block for block in NetworkBlock.query.all()}
+    summary: list[dict] = []
     seen: set[str] = set()
-    checks = HealthCheck.query.order_by(HealthCheck.checked_at.desc()).all()
+    checks = HealthCheck.query.order_by(HealthCheck.checked_at.desc()).limit(max(limit * 5, 30)).all()
     for check in checks:
-        if check.target in seen:
+        filename = Path(urlparse(check.target).path).name
+        if not filename or filename in seen:
             continue
-        seen.add(check.target)
-        latest.append(check)
-        if limit and len(latest) >= limit:
+        seen.add(filename)
+        summary.append({"check": check, "block": blocks.get(filename), "filename": filename})
+        if len(summary) >= limit:
             break
-    return latest
+    return summary
+
+
+def _online_users(window_minutes: int = 5) -> list[User]:
+    cutoff = utcnow() - timedelta(minutes=window_minutes)
+    return User.query.filter(
+        User.active.is_(True), User.deleted_at.is_(None), User.last_seen_at >= cutoff
+    ).order_by(User.last_seen_at.desc(), User.email).all()
+
+
+def _admin_scans_token() -> str:
+    secret = str(current_app.config.get("SSO_SIGNING_SECRET", ""))
+    if not secret:
+        return ""
+    return hmac.new(
+        secret.encode("utf-8"),
+        b"isp-network-tools:admin-scans:v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _fetch_running_scans() -> dict:
+    """Read active health scans over the private Docker network."""
+    base_url = str(current_app.config.get("HEALTH_INTERNAL_BASE_URL", "")).rstrip("/")
+    token = _admin_scans_token()
+    if not base_url or not token:
+        return {"available": False, "scans": []}
+    try:
+        health_host = urlparse(
+            str(current_app.config.get("HEALTH_BASE_URL", ""))
+        ).netloc or "network-health.localhost"
+        response = requests.get(
+            f"{base_url}/internal/admin/scans",
+            # Flask's trusted-host check sees the Docker service name as Host;
+            # use the configured public health hostname for the internal call.
+            headers={"X-ISP-Admin-Token": token, "Host": health_host},
+            timeout=3,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        current_app.logger.warning("Consulta de scans ativos indisponível")
+        return {"available": False, "scans": []}
+    scans = payload.get("scans", []) if isinstance(payload, dict) else []
+    return {
+        "available": True,
+        "scans": [scan for scan in scans if isinstance(scan, dict)],
+    }
 
 
 def _dashboard_map_data(snapshot: dict) -> dict:
@@ -427,28 +479,44 @@ def _propose_editor_mutation(
 @bp.get("/")
 @login_required
 def dashboard():
+    user = current_user()
     working = build_snapshot()
     validation = validate_snapshot(working)
     latest = Publication.query.order_by(Publication.version.desc()).first()
-    latest_health = _latest_health_by_target()
-    pending = ChangeRequest.query.filter(ChangeRequest.status.in_(["pending", "scheduled"])).count()
-    ranking = db.session.query(User, func.count(ChangeRequest.id).label("approved_changes")).join(
-        ChangeRequest, ChangeRequest.requested_by_id == User.id
-    ).filter(ChangeRequest.status == "approved").group_by(User.id).order_by(
-        func.count(ChangeRequest.id).desc(), User.display_name, User.email
-    ).limit(8).all()
+    running_scan_data = _fetch_running_scans() if user.is_super_admin() else {"available": True, "scans": []}
     return render_template(
         "dashboard.html",
         company_count=Company.query.filter_by(active=True).count(),
         block_count=NetworkBlock.query.filter_by(active=True).count(),
         entry_count=FeedEntry.query.count(),
-        pending_count=pending,
         working_hash=snapshot_hash(working),
         latest=latest,
         validation=validation,
-        latest_health=latest_health,
+        online_user_count=User.query.filter(
+            User.active.is_(True), User.deleted_at.is_(None),
+            User.last_seen_at >= utcnow() - timedelta(minutes=5)
+        ).count(),
+        running_scan_count=len(running_scan_data["scans"]),
         map_data=_dashboard_map_data(working),
-        ranking=ranking,
+        scanned_blocks=_latest_scanned_blocks(),
+    )
+
+
+@bp.get("/users/online")
+@roles_required("admin")
+def online_users():
+    return render_template("online_users.html", users=_online_users())
+
+
+@bp.get("/scans/running")
+@roles_required("super_admin")
+def running_scans():
+    scan_data = _fetch_running_scans()
+    return render_template(
+        "running_scans.html",
+        scans=scan_data["scans"],
+        scans_available=scan_data["available"],
+        refreshed_at=utcnow(),
     )
 
 

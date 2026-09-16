@@ -3,40 +3,44 @@
 {% block head_extra %}<link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css') }}"><script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js') }}" defer></script>{% endblock %}
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">Operações de rede</p><h1>Visão geral</h1><p class="muted">Estado, validação e saúde dos geofeeds publicados.</p></div>
+  <div><p class="eyebrow">Operações de rede</p><h1>Visão geral</h1><p class="muted">Uma leitura rápida do catálogo, da publicação e das atividades em andamento.</p></div>
 </div>
 
-<section class="stats-grid">
-  <article class="stat"><span>Empresas</span><strong>{{ company_count }}</strong></article>
-  <article class="stat"><span>Blocos ativos</span><strong>{{ block_count }}</strong></article>
-  <article class="stat"><span>Entradas</span><strong>{{ entry_count }}</strong></article>
-  <article class="stat"><span>Aprovações</span><strong>{{ pending_count }}</strong></article>
-</section>
-
-<div class="dashboard-map-layout">
-  <section class="card map-card" data-ip-map-card>
-    <div class="card-heading"><div><h2>Distribuição de blocos IP</h2><p class="muted">Quantidade de blocos por estado brasileiro; use a roda do mouse para aproximar.</p></div></div>
-    <div class="map-shell"><div class="map-viewport" data-map-viewport><div class="ip-map" data-ip-map role="img" aria-label="Mapa do Brasil com a quantidade de blocos IP por macroregião, estado e cidade"></div><div class="map-loading" data-map-loading>Carregando mapa…</div></div></div>
-    <script type="application/json" id="map-data">{{ map_data|tojson }}</script>
-  </section>
-
-  <div class="dashboard-side-stack">
-    <section class="card">
-      <h2>Última publicação</h2>
-      {% if latest %}<dl class="details"><div><dt>Versão</dt><dd>v{{ latest.version }}</dd></div><div><dt>Data</dt><dd>{{ latest.published_at }}</dd></div><div><dt>Responsável</dt><dd>{{ latest.published_by.email }}</dd></div></dl><a class="text-link" href="{{ url_for('panel.history_detail', publication_id=latest.id) }}">Ver versão publicada</a>{% else %}<p class="muted">Ainda não existe uma publicação gerenciada pelo painel. Os arquivos públicos atuais permanecem intactos.</p>{% endif %}
+<div class="dashboard-layout">
+  <div class="dashboard-primary">
+    <section class="stats-grid dashboard-stats" aria-label="Indicadores do geofeed">
+      <article class="stat"><span>Empresas</span><strong>{{ company_count }}</strong><small>com cadastro ativo</small></article>
+      <article class="stat stat-rfc">
+        <div class="stat-heading"><span>Blocos ativos</span><button class="rfc-status {{ 'rfc-status-ok' if validation.valid else 'rfc-status-error' }}" type="button" data-rfc-toggle aria-haspopup="dialog" aria-expanded="false" aria-controls="rfc-validation-popover"><span class="sr-only">Validação RFC 8805: </span>{{ 'OK' if validation.valid else 'Fora do padrão' }}</button></div>
+        <strong>{{ block_count }}</strong><small>publicados no catálogo</small>
+        <div class="rfc-popover" id="rfc-validation-popover" data-rfc-popover hidden>
+          <div class="rfc-popover-heading"><strong>Validação RFC 8805</strong><button type="button" class="popover-close" data-rfc-close aria-label="Fechar validação">×</button></div>
+          {% if validation.errors %}<ul class="message-list error-list">{% for item in validation.errors %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+          {% if validation.warnings %}<ul class="message-list warning-list">{% for item in validation.warnings[:20] %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
+          {% if validation.valid and not validation.warnings %}<p class="success-text">Nenhum erro ou alerta encontrado.</p>{% endif %}
+        </div>
+      </article>
+      <article class="stat"><span>Entradas</span><strong>{{ entry_count }}</strong><small>prefixos geográficos</small></article>
     </section>
-    <section class="card">
-    <div class="card-heading"><div><h2>Validação RFC 8805</h2><p class="muted">Verificação do rascunho atual.</p></div><span class="badge {{ 'badge-ok' if validation.valid else 'badge-error' }}">{{ 'Válido' if validation.valid else 'Com erros' }}</span></div>
-    {% if validation.errors %}<ul class="message-list error-list">{% for item in validation.errors %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
-    {% if validation.warnings %}<ul class="message-list warning-list">{% for item in validation.warnings[:20] %}<li>{{ item }}</li>{% endfor %}</ul>{% endif %}
-    {% if validation.valid and not validation.warnings %}<p class="success-text">Nenhum erro ou alerta encontrado.</p>{% endif %}
+
+    <section class="card map-card" data-ip-map-card>
+      <div class="card-heading"><div><p class="eyebrow">Cobertura publicada</p><h2>Distribuição de blocos IP</h2><p class="muted">Quantidade de blocos por estado brasileiro; use a roda do mouse para aproximar.</p></div><a class="text-link" href="{{ url_for('panel.blocks') }}">Abrir blocos</a></div>
+      <div class="map-shell"><div class="map-viewport" data-map-viewport><div class="ip-map" data-ip-map role="img" aria-label="Mapa do Brasil com a quantidade de blocos IP por macroregião, estado e cidade"></div><div class="map-loading" data-map-loading>Carregando mapa…</div></div></div>
+      <script type="application/json" id="map-data">{{ map_data|tojson }}</script>
     </section>
-    <section class="card ranking-card"><div class="card-heading"><div><h2>Ranking de atualizações</h2><p class="muted">Alterações aprovadas no histórico.</p></div></div>{% if ranking %}<ol class="user-ranking">{% for user, total in ranking %}<li><span>{{ user.nickname or user.display_name or user.username or user.email }}</span><strong>{{ total }}</strong></li>{% endfor %}</ol>{% else %}<p class="muted">Ainda não há alterações aprovadas.</p>{% endif %}</section>
   </div>
-</div>
 
-<section class="card">
-  <div class="card-heading"><div><h2>Saúde dos arquivos públicos</h2><p class="muted">Últimas verificações registradas.</p></div><a class="text-link" href="{{ url_for('panel.monitoring') }}">Abrir monitoramento</a></div>
-  {% if latest_health %}<div class="table-wrap"><table><thead><tr><th>URL</th><th>Status</th><th>HTTP</th><th>Tempo</th><th>Verificado</th></tr></thead><tbody>{% for check in latest_health %}<tr><td class="mono">{{ check.target }}</td><td><span class="badge {{ 'badge-ok' if check.ok else 'badge-error' }}">{{ 'OK' if check.ok else 'Falha' }}</span></td><td>{{ check.http_status or '—' }}</td><td>{{ check.response_ms or '—' }} ms</td><td>{{ check.checked_at }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="muted">O monitoramento começará após a primeira publicação pelo painel.</p>{% endif %}
-</section>
+  <aside class="dashboard-secondary" aria-label="Atividade operacional">
+    <div class="dashboard-quick-stats">
+      {% if current_user.is_admin() %}<a class="quick-stat quick-stat-online" href="{{ url_for('panel.online_users') }}"><span class="quick-stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c.4-3.2 2.4-5 6-5s5.6 1.8 6 5M16 5.2a3 3 0 0 1 0 5.7M17 15c2.4.1 3.8 1.7 4 4.2"></path></svg></span><span><small>Usuários Online</small><strong>{{ online_user_count }}</strong><em>ver lista ativa</em></span></a>{% else %}<div class="quick-stat quick-stat-online"><span class="quick-stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c.4-3.2 2.4-5 6-5s5.6 1.8 6 5M16 5.2a3 3 0 0 1 0 5.7M17 15c2.4.1 3.8 1.7 4 4.2"></path></svg></span><span><small>Usuários Online</small><strong>{{ online_user_count }}</strong><em>janela de 5 minutos</em></span></div>{% endif %}
+      {% if current_user.is_super_admin() %}<a class="quick-stat quick-stat-scans" href="{{ url_for('panel.running_scans') }}"><span class="quick-stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"></path><circle cx="18" cy="16" r="3"></circle><path d="m20.2 18.2 1.4 1.4"></path></svg></span><span><small>Scans Rodando</small><strong>{{ running_scan_count }}</strong><em>ver operações ativas</em></span></a>{% else %}<div class="quick-stat quick-stat-scans"><span class="quick-stat-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h10M4 17h7"></path><circle cx="18" cy="16" r="3"></circle><path d="m20.2 18.2 1.4 1.4"></path></svg></span><span><small>Scans Rodando</small><strong>{{ running_scan_count }}</strong><em>disponível ao Superadmin</em></span></div>{% endif %}
+    </div>
+
+    <section class="card scanned-summary">
+      <div class="card-heading"><div><p class="eyebrow">Atividade recente</p><h2>Últimos blocos escaneados</h2><p class="muted">Verificações mais recentes do catálogo publicado.</p></div><a class="text-link" href="{{ url_for('panel.monitoring') }}">Ver tudo</a></div>
+      {% if scanned_blocks %}<ul class="scanned-list">{% for item in scanned_blocks %}<li class="scanned-item"><div><strong>{{ item.block.cidr if item.block else item.filename }}</strong><small>{{ item.block.company.name if item.block else 'Arquivo público' }} · {{ item.check.checked_at }}</small></div><span class="badge {{ 'badge-ok' if item.check.ok else 'badge-error' }}">{{ 'OK' if item.check.ok else 'Falha' }}</span></li>{% endfor %}</ul>{% else %}<p class="empty-state">Ainda não há blocos escaneados.</p>{% endif %}
+      {% if latest %}<p class="publication-meta">Última publicação <strong>v{{ latest.version }}</strong> · {{ latest.published_at }} · <a class="text-link" href="{{ url_for('panel.history_detail', publication_id=latest.id) }}">Ver detalhes</a></p>{% endif %}
+    </section>
+  </aside>
+</div>
 {% endblock %}

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hmac
+import hashlib
 import ipaddress
 import json
 import secrets
@@ -22,6 +23,7 @@ from .storage import (
     create_scan,
     get_scan,
     init_schema,
+    list_active_scans_for_admin,
     list_results,
     list_scans,
 )
@@ -129,6 +131,24 @@ def _scan_payload(scan: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _result_payload(result: dict[str, Any]) -> dict[str, Any]:
+    payload = dict(result)
+    if payload.get("created_at") is not None:
+        payload["created_at"] = payload["created_at"].isoformat()
+    return payload
+
+
+def _admin_scans_token() -> str:
+    secret = str(app.config.get("SSO_SIGNING_SECRET", ""))
+    if not secret:
+        return ""
+    return hmac.new(
+        secret.encode("utf-8"),
+        b"isp-network-tools:admin-scans:v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+
 @app.before_request
 def prepare_request():
     _csrf_token()
@@ -163,6 +183,26 @@ def internal_health():
         return jsonify({"status": "ok"})
     except Exception:
         return jsonify({"status": "degraded"}), 503
+
+
+@app.get("/internal/admin/scans")
+@limiter.exempt
+def internal_admin_scans():
+    supplied = request.headers.get("X-ISP-Admin-Token", "")
+    expected = _admin_scans_token()
+    if not expected or not supplied or not hmac.compare_digest(supplied, expected):
+        abort(403)
+    try:
+        _ensure_schema()
+        scans = []
+        for scan in list_active_scans_for_admin():
+            payload = _scan_payload(scan)
+            payload["results"] = [_result_payload(item) for item in list_results(int(scan["id"]))]
+            scans.append(payload)
+        return jsonify({"scans": scans})
+    except Exception:
+        app.logger.exception("Falha ao carregar scans para o Admin Center")
+        return jsonify({"error": "Não foi possível consultar os scans ativos."}), 503
 
 
 @app.get("/sso/callback")
@@ -214,7 +254,16 @@ def index():
         "index.html",
         scans=scans,
         app_env=app.config["APP_ENV"],
+        suite_name=app.config["SUITE_NAME"],
         admin_base_url=app.config["ADMIN_BASE_URL"],
+        public_base_url=app.config["PUBLIC_BASE_URL"],
+        health_base_url=app.config["HEALTH_BASE_URL"],
+        admin_center_url=app.config["ADMIN_BASE_URL"],
+        application_links=[
+            {"code": "geofeed_public", "name": "Geofeed público", "url": app.config["PUBLIC_BASE_URL"]},
+            {"code": "admin_center", "name": "Admin Center", "url": app.config["ADMIN_BASE_URL"]},
+            {"code": "isp_network_health", "name": "ISP Network Health", "url": url_for("index")},
+        ],
     )
 
 
@@ -282,7 +331,16 @@ def scan_detail(scan_id: int):
         selected_scan=_scan_payload(scan),
         results=list_results(scan_id) if scan["status"] in {"succeeded", "failed", "canceled"} else [],
         app_env=app.config["APP_ENV"],
+        suite_name=app.config["SUITE_NAME"],
         admin_base_url=app.config["ADMIN_BASE_URL"],
+        public_base_url=app.config["PUBLIC_BASE_URL"],
+        health_base_url=app.config["HEALTH_BASE_URL"],
+        admin_center_url=app.config["ADMIN_BASE_URL"],
+        application_links=[
+            {"code": "geofeed_public", "name": "Geofeed público", "url": app.config["PUBLIC_BASE_URL"]},
+            {"code": "admin_center", "name": "Admin Center", "url": app.config["ADMIN_BASE_URL"]},
+            {"code": "isp_network_health", "name": "ISP Network Health", "url": url_for("index")},
+        ],
     )
 
 

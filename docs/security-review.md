@@ -15,6 +15,19 @@ Este mapa usa o OWASP Top 10 como baseline. A revisão foi aplicada ao primeiro 
 | A09 Falhas de logging | Auditoria recuperada, logs sem credenciais e eventos de worker | Implementado no corte atual; retenção externa pendente |
 | A10 SSRF | Bloqueio de destinos privados, timeout, DNS rebinding e egress mínimo | Validação de destinos e timeouts implementados; política de egress pendente |
 
+## Revisão desta alteração: dashboard operacional
+
+| Área | Verificação | Estado |
+| --- | --- | --- |
+| Dashboard | A tela inicial exibe somente dados agregados do catálogo e da publicação; as antigas sessões de saúde pública e ranking foram removidas | Implementado |
+| Usuários online | `/users/online` exige uma sessão autenticada com papel administrativo e usa uma janela de presença de cinco minutos | Implementado |
+| Scans ativos | `/scans/running` exige `super_admin`; o painel recebe apenas os scans em estado `queued` ou `running` | Implementado |
+| Integração interna | `/internal/admin/scans` aceita somente o token HMAC derivado do segredo SSO; chamadas sem token retornam 403 | Implementado |
+| Exposição de dados | Resultados são somente leitura, renderizados por escaping do template e limitados ao escopo operacional | Implementado |
+| White label | O hostname usado na chamada interna é derivado de `HEALTH_BASE_URL`, sem domínio fixo da marca | Implementado |
+
+Não foram encontrados novos caminhos de alteração de estado nas telas desta entrega. As rotas existentes continuam protegidas por autorização no servidor e CSRF conforme a matriz atual.
+
 ## Regras obrigatórias
 
 - esconder uma aplicação no lançador nunca substitui autorização de rota ou API;

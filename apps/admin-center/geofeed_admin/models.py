@@ -57,6 +57,7 @@ class User(TimestampMixin, db.Model):
     deleted_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
     deleted_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     last_login_at = db.Column(db.DateTime(timezone=True), nullable=True)
+    last_seen_at = db.Column(db.DateTime(timezone=True), nullable=True, index=True)
     created_by_id = db.Column(db.Integer, db.ForeignKey("users.id"), nullable=True)
     groups = db.relationship("Group", secondary=user_group_members, back_populates="users")
     application_grants = db.relationship(

@@ -129,6 +129,21 @@ if (appLauncher) {
     }
   });
 }
+document.querySelectorAll("[data-rfc-toggle]").forEach((toggle) => {
+  const popover = document.getElementById(toggle.getAttribute("aria-controls"));
+  if (!popover) return;
+  const close = () => { popover.hidden = true; toggle.setAttribute("aria-expanded", "false"); };
+  toggle.addEventListener("click", () => {
+    const open = popover.hidden;
+    document.querySelectorAll("[data-rfc-popover]").forEach((item) => { item.hidden = true; });
+    document.querySelectorAll("[data-rfc-toggle]").forEach((item) => { item.setAttribute("aria-expanded", "false"); });
+    popover.hidden = !open;
+    toggle.setAttribute("aria-expanded", String(open));
+  });
+  popover.querySelector("[data-rfc-close]")?.addEventListener("click", () => { close(); toggle.focus(); });
+  document.addEventListener("click", (event) => { if (!popover.contains(event.target) && event.target !== toggle) close(); });
+  document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !popover.hidden) { close(); toggle.focus(); } });
+});
 document.querySelectorAll("select[data-auto-submit]").forEach((select) => select.addEventListener("change", () => select.form.submit()));
 document.querySelectorAll("[data-select-all]").forEach((master) => master.addEventListener("change", () => {
   const form = master.closest("form");

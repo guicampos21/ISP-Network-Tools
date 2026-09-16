@@ -27,9 +27,7 @@ def _setup_available() -> bool:
 
 
 def _post_login_redirect(user: User):
-    """Open the Admin Center at settings for its primary administrator."""
-    if user.is_super_admin():
-        return redirect(url_for("panel.settings"))
+    """Open every authenticated user at the operational overview."""
     return redirect(url_for("panel.dashboard"))
 
 

@@ -53,7 +53,7 @@ def test_only_superadmin_can_manage_application_access(client, app):
     assert b"ISP Network Health" in response.data
 
 
-def test_superadmin_login_opens_admin_center_settings(client, app):
+def test_superadmin_login_opens_operational_overview(client, app):
     with app.app_context():
         User.query.filter_by(email="admin@example.test").one().role = "super_admin"
         db.session.commit()
@@ -61,7 +61,7 @@ def test_superadmin_login_opens_admin_center_settings(client, app):
     response = client.post("/dev-login")
 
     assert response.status_code == 302
-    assert response.headers["Location"].endswith("/settings")
+    assert response.headers["Location"].endswith("/")
 
 
 def test_application_launcher_has_search_and_semantic_icons(client, app):
@@ -77,4 +77,36 @@ def test_application_launcher_has_search_and_semantic_icons(client, app):
     assert 'app-icon-geofeed' in html
     assert 'app-icon-admin' in html
     assert 'app-icon-health' in html
-    assert 'href="/settings"' in html
+    assert 'href="/"' in html
+
+
+def test_operational_dashboard_has_the_new_layout(client, app):
+    login_as(client, app, "admin@example.test")
+
+    html = client.get("/").get_data(as_text=True)
+
+    assert "Visão geral" in html
+    assert "Usuários Online" in html
+    assert "Scans Rodando" in html
+    assert "Últimos blocos escaneados" in html
+    assert "Saúde dos arquivos públicos" not in html
+    assert "Ranking de atualizações" not in html
+    assert "data-rfc-toggle" in html
+
+
+def test_operational_activity_routes_follow_role_boundaries(client, app, monkeypatch):
+    login_as(client, app, "admin@example.test")
+    assert client.get("/users/online").status_code == 200
+    assert client.get("/scans/running").status_code == 403
+
+    with app.app_context():
+        User.query.filter_by(email="admin@example.test").one().role = "super_admin"
+        db.session.commit()
+    monkeypatch.setattr(
+        "geofeed_admin.routes._fetch_running_scans",
+        lambda: {"available": True, "scans": []},
+    )
+    assert client.get("/scans/running").status_code == 200
+
+    login_as(client, app, "editor@example.test")
+    assert client.get("/users/online").status_code == 403
