@@ -1,23 +1,51 @@
 <!doctype html>
 <html lang="pt-BR">
 <head>
+  {% from "_application_icon.html" import app_icon %}
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>{% block title %}Admin Center{% endblock %} · {{ portal_branding.company_name }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260828-user-auth') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260915-suite-launcher') }}">
   {% block head_extra %}{% endblock %}
-  <script src="{{ url_for('static', filename='app.js', v='20260828-change-review') }}" defer></script>
+  <script src="{{ url_for('static', filename='app.js', v='20260915-suite-launcher') }}" defer></script>
 </head>
 <body style="--brand: {{ portal_branding.primary }}; --brand-2: {{ portal_branding.secondary }}; --brand-light: {{ portal_branding.accent }}; --portal-bg-start: {{ portal_branding.background_start }}; --portal-bg-end: {{ portal_branding.background_end }}; {% if portal_branding.gradient %}background: radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--brand) 20%, transparent), transparent 34rem), linear-gradient(145deg, var(--portal-bg-start), var(--portal-bg-end));{% else %}background: linear-gradient(145deg, var(--portal-bg-start), var(--portal-bg-end));{% endif %}">
   <a class="skip-link" href="#main-content">Pular para o conteúdo principal</a>
   <div class="topline"></div>
   {% if current_user %}
   <header class="site-header">
-    <a class="brand" href="{{ url_for('panel.dashboard') }}">
-      <span class="brand-mark" aria-hidden="true">I</span>
-      <span><strong>Admin Center</strong><small>{{ portal_branding.suite_name }}</small></span>
-    </a>
+    <div class="header-start">
+      <details class="app-launcher" data-app-launcher>
+        <summary class="launcher-trigger" data-launcher-trigger aria-label="Abrir aplicações" aria-controls="suite-launcher-panel" aria-expanded="false" title="Aplicações">
+          <span class="launcher-grid-icon" aria-hidden="true">{% for _ in range(9) %}<i></i>{% endfor %}</span>
+        </summary>
+        <div class="launcher-panel" id="suite-launcher-panel" role="dialog" aria-label="Aplicações da suíte">
+          <div class="launcher-heading">
+            <div><span class="launcher-overline">{{ portal_branding.suite_name }}</span><strong>Aplicações</strong></div>
+            <button class="launcher-close" type="button" data-launcher-close aria-label="Fechar aplicações">×</button>
+          </div>
+          <label class="launcher-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg>
+            <span class="sr-only">Pesquisar aplicações</span>
+            <input type="search" data-launcher-search placeholder="Localizar aplicações da suíte" autocomplete="off">
+          </label>
+          <div class="launcher-grid" data-launcher-grid>
+          {% for application in suite_applications if application.available %}
+            <a class="launcher-item" data-launcher-item data-app-label="{{ application.name }} {{ application.description }}" href="{{ application.url }}">
+              {{ app_icon(application.code) }}
+              <span class="launcher-item-copy"><strong>{{ application.name }}</strong><small>{{ application.description }}</small></span>
+            </a>
+          {% endfor %}
+            <p class="launcher-empty" data-launcher-empty role="status" aria-live="polite" hidden>Nenhuma aplicação encontrada.</p>
+          </div>
+        </div>
+      </details>
+      <a class="brand" href="{{ url_for('panel.settings') if current_user.is_super_admin() else url_for('panel.dashboard') }}">
+        <span class="brand-mark" aria-hidden="true">I</span>
+        <span><strong>Admin Center</strong><small>{{ portal_branding.suite_name }}</small></span>
+      </a>
+    </div>
     <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false">Menu</button>
     <nav class="nav" data-nav>
       <a class="{{ 'is-active' if request.endpoint == 'panel.dashboard' else '' }}" href="{{ url_for('panel.dashboard') }}">Visão geral</a>
@@ -30,20 +58,6 @@
       {% if current_user.is_super_admin() %}<a class="{{ 'is-active' if request.endpoint == 'panel.settings' else '' }}" href="{{ url_for('panel.settings') }}">Configurações</a>{% endif %}
     </nav>
     <div class="account">
-      <details class="app-launcher">
-        <summary class="launcher-trigger" aria-label="Abrir aplicações"><span class="launcher-icon" aria-hidden="true">⌘</span><span>Aplicações</span></summary>
-        <div class="launcher-panel" role="menu">
-          <div class="launcher-heading"><strong>{{ portal_branding.suite_name }}</strong><small>Aplicações disponíveis</small></div>
-          <div class="launcher-grid">
-          {% for application in suite_applications if application.available %}
-            <a class="launcher-item" role="menuitem" href="{{ application.url }}">
-              <span class="launcher-item-icon" aria-hidden="true">{{ {'geofeed_public': 'G', 'admin_center': 'A', 'isp_network_health': 'H'}.get(application.code, '•') }}</span>
-              <span><strong>{{ application.name }}</strong><small>{{ application.description }}</small></span>
-            </a>
-          {% endfor %}
-          </div>
-        </div>
-      </details>
       <div class="notification-menu"><button class="notification-link" type="button" data-notification-toggle aria-label="Notificações" aria-expanded="false" title="Notificações"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>{% if unread_notifications %}<span class="notification-badge">{{ unread_notifications if unread_notifications < 100 else '99+' }}</span>{% endif %}</button><div class="notification-popup" data-notification-popup hidden><div class="notification-popup-heading"><strong>Notificações</strong><a href="{{ url_for('panel.notifications') }}">Ver todas</a></div><div data-notification-list><p class="muted">Carregando…</p></div></div></div>
       <details class="account-menu">
         <summary class="account-trigger">

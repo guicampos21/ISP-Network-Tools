@@ -51,3 +51,30 @@ def test_only_superadmin_can_manage_application_access(client, app):
     response = client.get("/access/applications")
     assert response.status_code == 200
     assert b"ISP Network Health" in response.data
+
+
+def test_superadmin_login_opens_admin_center_settings(client, app):
+    with app.app_context():
+        User.query.filter_by(email="admin@example.test").one().role = "super_admin"
+        db.session.commit()
+
+    response = client.post("/dev-login")
+
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/settings")
+
+
+def test_application_launcher_has_search_and_semantic_icons(client, app):
+    with app.app_context():
+        User.query.filter_by(email="admin@example.test").one().role = "super_admin"
+        db.session.commit()
+    login_as(client, app, "admin@example.test")
+    html = client.get("/access/applications").get_data(as_text=True)
+
+    assert 'data-app-launcher' in html
+    assert 'data-launcher-search' in html
+    assert 'class="launcher-grid-icon"' in html
+    assert 'app-icon-geofeed' in html
+    assert 'app-icon-admin' in html
+    assert 'app-icon-health' in html
+    assert 'href="/settings"' in html

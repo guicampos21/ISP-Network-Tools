@@ -1,0 +1,35 @@
+{% macro app_icon(code) -%}
+  {% if code == 'geofeed_public' %}
+  <span class="app-icon app-icon-geofeed">
+    <svg viewBox="0 0 48 48" focusable="false" aria-hidden="true">
+      <circle cx="24" cy="24" r="16"></circle>
+      <path d="M8 24h32M24 8c4.4 4.4 6.2 10.3 6.2 16S28.4 35.6 24 40c-4.4-4.4-6.2-10.3-6.2-16S19.6 12.4 24 8Z"></path>
+      <path d="M11 15.5c3.6 2 8 3 13 3s9.4 1 13-3M11 32.5c3.6-2 8-3 13-3s9.4 1 13 3"></path>
+    </svg>
+  </span>
+  {% elif code == 'admin_center' %}
+  <span class="app-icon app-icon-admin">
+    <svg viewBox="0 0 48 48" focusable="false" aria-hidden="true">
+      <path d="M24 5.5 38 11v10.3c0 9.4-5.7 17-14 21.2-8.3-4.2-14-11.8-14-21.2V11l14-5.5Z"></path>
+      <path d="M17 19h14M17 25h14M17 31h7"></path>
+      <circle cx="31" cy="31" r="4.5"></circle>
+      <path d="m34.2 34.2 3 3"></path>
+    </svg>
+  </span>
+  {% elif code == 'isp_network_health' %}
+  <span class="app-icon app-icon-health">
+    <svg viewBox="0 0 48 48" focusable="false" aria-hidden="true">
+      <path d="M5 25h7l4-10 7 19 5-14 4 5h11"></path>
+      <circle cx="10" cy="25" r="2.2"></circle>
+      <circle cx="38" cy="25" r="2.2"></circle>
+    </svg>
+  </span>
+  {% else %}
+  <span class="app-icon app-icon-default">
+    <svg viewBox="0 0 48 48" focusable="false" aria-hidden="true">
+      <rect x="10" y="10" width="28" height="28" rx="6"></rect>
+      <path d="M17 24h14M24 17v14"></path>
+    </svg>
+  </span>
+  {% endif %}
+{%- endmacro %}

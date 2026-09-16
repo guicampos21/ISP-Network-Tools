@@ -306,7 +306,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "description": application.description,
                     "url": {
                         "geofeed_public": app.config.get("PUBLIC_BASE_URL"),
-                        "admin_center": app.config.get("ADMIN_BASE_URL"),
+                        "admin_center": url_for("panel.settings") if user and user.is_super_admin() else app.config.get("ADMIN_BASE_URL"),
                         "isp_network_health": url_for("panel.issue_sso", target="isp_network_health") if user else app.config.get("HEALTH_BASE_URL"),
                     }.get(application.code, application.url),
                     "available": (

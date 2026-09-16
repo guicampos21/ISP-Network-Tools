@@ -26,6 +26,13 @@ def _setup_available() -> bool:
     return not User.query.filter_by(role="super_admin", active=True).first()
 
 
+def _post_login_redirect(user: User):
+    """Open the Admin Center at settings for its primary administrator."""
+    if user.is_super_admin():
+        return redirect(url_for("panel.settings"))
+    return redirect(url_for("panel.dashboard"))
+
+
 @bp.route("/setup", methods=["GET", "POST"])
 @limiter.limit("5 per hour")
 def setup():
@@ -82,8 +89,9 @@ def setup():
 
 @bp.get("/login")
 def login():
-    if current_user():
-        return redirect(url_for("panel.dashboard"))
+    user = current_user()
+    if user:
+        return _post_login_redirect(user)
     return render_template(
         "login.html",
         entra_ready=oauth.create_client("entra") is not None and get_setting("auth.m365_enabled", "True") == "True",
@@ -157,7 +165,7 @@ def entra_callback():
     start_login(user, "m365", remember)
     audit("auth.login", "user", user.id, user=user)
     db.session.commit()
-    return redirect(url_for("panel.dashboard"))
+    return _post_login_redirect(user)
 
 
 @bp.get("/auth/google")
@@ -206,7 +214,7 @@ def google_callback():
     start_login(user, "google", bool(session.get("remember_requested")))
     audit("auth.login", "user", user.id, {"method": "google"}, user=user)
     db.session.commit()
-    return redirect(url_for("panel.dashboard"))
+    return _post_login_redirect(user)
 
 
 @bp.post("/local-login")
@@ -249,7 +257,7 @@ def _complete_local_login(user: User):
     db.session.commit()
     if user.password_change_required:
         return redirect(url_for("auth.password_change"))
-    return redirect(url_for("panel.dashboard"))
+    return _post_login_redirect(user)
 
 
 @bp.route("/password/change", methods=["GET", "POST"])
@@ -268,7 +276,7 @@ def password_change():
             audit("user.password_changed", "user", user.id, user=user)
             db.session.commit()
             flash("Senha atualizada.", "success")
-            return redirect(url_for("panel.dashboard"))
+            return _post_login_redirect(user)
     return render_template("password_change.html", user=user)
 
 
@@ -339,4 +347,4 @@ def dev_login():
     session.clear()
     session["user_id"] = user.id
     session.permanent = True
-    return redirect(url_for("panel.dashboard"))
+    return _post_login_redirect(user)
