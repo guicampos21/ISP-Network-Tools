@@ -1,19 +1,43 @@
 {% extends "base.html" %}
-{% block title %}Entrar{% endblock %}
+{% from "_application_icon.html" import app_icon %}
+{% block title %}{{ portal_branding.suite_name }}{% endblock %}
 {% block content %}
-<section class="login-card">
-  <div class="brand brand-login"><span class="brand-mark">I</span><span><strong>Admin Center</strong><small>{{ portal_branding.company_name }}</small></span></div>
-  <p class="eyebrow">Acesso administrativo</p>
-  <h1>Gerenciamento seguro de geofeeds</h1>
-  <p class="login-prompt">Entre com sua conta</p>
-  {% if local_auth_enabled %}<form id="local-login-form" method="post" action="{{ url_for('auth.local_login') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><span>Username</span><input name="username" autocomplete="username" required></label><label><span>Senha</span><input type="password" name="password" autocomplete="current-password" required></label><label class="check remember-choice"><input type="checkbox" name="remember" data-remember-toggle><span>Manter conectado neste dispositivo</span></label><button class="button button-secondary button-wide" type="submit">Entrar com conta local</button></form>{% elif entra_ready or google_ready %}<label class="check remember-choice"><input type="checkbox" data-remember-toggle><span>Manter conectado neste dispositivo</span></label>{% endif %}
-  {% if entra_ready or google_ready %}<p class="login-alternative">Ou entre com:</p><div class="login-providers">{% if entra_ready %}<a class="button button-primary microsoft-button button-wide" data-remember-link="{{ url_for('auth.entra_login') }}" href="{{ url_for('auth.entra_login') }}"><span class="microsoft-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Microsoft 365</a>{% endif %}{% if google_ready %}<a class="button button-secondary google-button button-wide" data-remember-link="{{ url_for('auth.google_login') }}" href="{{ url_for('auth.google_login') }}"><span class="google-logo" aria-hidden="true">G</span>Google Workspace</a>{% endif %}</div>{% endif %}
-  {% if dev_auth %}
-  <form method="post" action="{{ url_for('auth.dev_login') }}" class="dev-login">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <button class="button button-secondary button-wide" type="submit">Login de desenvolvimento</button>
-  </form>
-  {% endif %}
-  {% if setup_available %}<p class="setup-link"><a href="{{ url_for('auth.setup') }}">Configurar primeiro SuperAdmin</a></p>{% endif %}
+<section class="login-shell" aria-labelledby="login-title">
+  <div class="login-card">
+    <div class="brand brand-login"><span class="brand-mark" aria-hidden="true">I</span><span><strong>{{ portal_branding.suite_name }}</strong><small>{{ portal_branding.company_name }}</small></span></div>
+    <p class="eyebrow">Acesso seguro</p>
+    <h1 id="login-title">Acesse sua operação ISP</h1>
+    <p class="login-intro">Entre para administrar os recursos e as ferramentas disponíveis para sua equipe.</p>
+    <p class="login-prompt">Entre com sua conta</p>
+    {% if local_auth_enabled %}<form id="local-login-form" method="post" action="{{ url_for('auth.local_login') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><span>Username</span><input name="username" autocomplete="username" required></label><label><span>Senha</span><input type="password" name="password" autocomplete="current-password" required></label><label class="check remember-choice"><input type="checkbox" name="remember" data-remember-toggle><span>Manter conectado neste dispositivo</span></label><button class="button button-secondary button-wide" type="submit">Entrar com conta local</button></form>{% elif entra_ready or google_ready %}<label class="check remember-choice"><input type="checkbox" data-remember-toggle><span>Manter conectado neste dispositivo</span></label>{% endif %}
+    {% if entra_ready or google_ready %}<p class="login-alternative">Ou entre com:</p><div class="login-providers">{% if entra_ready %}<a class="button button-primary microsoft-button button-wide" data-remember-link="{{ url_for('auth.entra_login') }}" href="{{ url_for('auth.entra_login') }}"><span class="microsoft-logo" aria-hidden="true"><i></i><i></i><i></i><i></i></span>Microsoft 365</a>{% endif %}{% if google_ready %}<a class="button button-secondary google-button button-wide" data-remember-link="{{ url_for('auth.google_login') }}" href="{{ url_for('auth.google_login') }}"><span class="google-logo" aria-hidden="true">G</span>Google Workspace</a>{% endif %}</div>{% endif %}
+    {% if dev_auth %}
+    <form method="post" action="{{ url_for('auth.dev_login') }}" class="dev-login">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <button class="button button-secondary button-wide" type="submit">Login de desenvolvimento</button>
+    </form>
+    {% endif %}
+    {% if setup_available %}<p class="setup-link"><a href="{{ url_for('auth.setup') }}">Configurar primeiro SuperAdmin</a></p>{% endif %}
+  </div>
+
+  <aside class="login-showcase" aria-labelledby="showcase-title">
+    <div class="showcase-backdrop" aria-hidden="true"><span></span><span></span><span></span><i></i><i></i><i></i></div>
+    <div class="showcase-content">
+      <p class="eyebrow">{{ portal_branding.suite_name }}</p>
+      <h2 id="showcase-title">Uma visão completa da sua operação de rede.</h2>
+      <p class="showcase-lead">Ferramentas conectadas para acompanhar endereçamento, reputação e saúde da infraestrutura em um só lugar.</p>
+      <div class="showcase-apps" aria-label="Aplicações da suíte">
+        <div class="showcase-app">{{ app_icon('geofeed_public') }}<span>Geofeed público</span></div>
+        <div class="showcase-app">{{ app_icon('admin_center') }}<span>Admin Center</span></div>
+        <div class="showcase-app">{{ app_icon('isp_network_health') }}<span>Network Health</span></div>
+      </div>
+      <ul class="showcase-capabilities">
+        <li><span class="capability-dot capability-dot-cyan" aria-hidden="true">↗</span><span><strong>Gerenciamento de Geofeed</strong><small>Publicação e governança do endereçamento.</small></span></li>
+        <li><span class="capability-dot capability-dot-green" aria-hidden="true">⌁</span><span><strong>Análise de saúde dos seus blocos IP</strong><small>Visibilidade sobre disponibilidade e reputação.</small></span></li>
+        <li><span class="capability-dot capability-dot-red" aria-hidden="true">!</span><span><strong>Blacklists e relatórios</strong><small>Detecções organizadas para decisão rápida.</small></span></li>
+        <li><span class="capability-dot capability-dot-purple" aria-hidden="true">◇</span><span><strong>Recursos de alocação de IP</strong><small>Controle operacional para sua equipe.</small></span></li>
+      </ul>
+    </div>
+  </aside>
 </section>
 {% endblock %}

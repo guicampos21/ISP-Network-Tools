@@ -1,12 +1,9 @@
 # Relatórios do ISP Network Health
 
-Os relatórios finais priorizam a leitura executiva. A tela mostra o alvo, o estado da execução, os indicadores principais, o risco e um pequeno conjunto de ocorrências em destaque. As consultas detalhadas ficam agrupadas por resultado em painéis recolhidos:
+Os relatórios finais mostram uma linha por endereço IP. A tela apresenta o alvo, o risco, a quantidade de endereços IP verificados, as sub-redes `/24`, as blacklists únicas consultadas e o tempo total entre o início e o encerramento da análise.
 
-- **Ocorrências encontradas**;
-- **Sem ocorrência**;
-- **Respostas permitidas**;
-- **Consultas incompletas**, para timeouts e erros.
+Os resultados são organizados por bloco. Cada IP exibe inicialmente apenas as blacklists que detectaram uma ocorrência; quando não há detecção, aparece o estado **Limpo**. O conjunto da coluna pode ser focalizado ou receber o ponteiro do mouse para mostrar a lista completa de fontes consultadas. Vermelho significa detecção, verde significa consulta concluída sem detecção e amarelo significa consulta incompleta.
 
-Use **Expandir todos** para abrir os grupos da tela e **Colapsar todos** para voltar à leitura resumida. O relatório HTML completo do CLI usa a mesma ideia para o catálogo de blacklists, o inventário por bloco e o inventário por IP.
+Use **Expandir todos** para abrir os blocos da tela e **Recolher todos** para voltar à leitura resumida. A coluna de resposta DNS e o tempo de cada consulta não fazem parte da visão executiva: uma resposta vazia era ambígua e o tempo individual não representa o tempo total da análise.
 
-Para gerar um PDF, use **Imprimir / salvar PDF** e selecione a impressora do navegador. Antes da impressão, os detalhes são abertos automaticamente para que o PDF contenha o inventário completo; depois do diálogo, a tela recupera o estado que estava aberto antes da impressão. A folha impressa usa fundo claro e bordas de maior contraste para manter a leitura em impressoras sem o tema escuro.
+Use **Gerar PDF** para obter o documento produzido pelo servidor. O PDF segue uma decisão automática: análises maiores são separadas por blocos `/24`; blocos limpos permanecem recolhidos e blocos com qualquer detecção são expandidos com os IPs envolvidos. Para um `/24` ou bloco menor, o documento mostra somente o bloco escaneado e aplica a mesma regra de expansão. Não há um controle no navegador para alterar essa decisão.

@@ -51,7 +51,7 @@ make compose-config
 
 O núcleo recuperado do INH continua testável sem acessar a rede; a camada web e o worker são evoluídos separadamente.
 
-Os relatórios do Network Health começam com um resumo compacto. Consultas, catálogos e inventários ficam recolhidos e podem ser abertos individualmente ou em conjunto; o PDF é produzido pela impressão do navegador. Consulte [docs/health-reporting.md](docs/health-reporting.md).
+Os relatórios do Network Health começam com um resumo compacto por endereço IP. Os resultados ficam organizados por bloco, com a lista completa de blacklists disponível ao passar o mouse ou usar o foco; o botão **Gerar PDF** produz o documento internamente com expansão automática dos blocos que possuem detecção. Consulte [docs/health-reporting.md](docs/health-reporting.md).
 
 ## Segurança
 

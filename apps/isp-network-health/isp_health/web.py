@@ -5,10 +5,11 @@ import hashlib
 import ipaddress
 import json
 import secrets
+from io import BytesIO
 from functools import wraps
 from typing import Any, Callable
 
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, session, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from redis import Redis
@@ -18,6 +19,7 @@ from inh.core import detect_target_type
 from isp_shared.sso import HandoffError, verify_handoff
 
 from .config import app_config
+from .reporting import build_health_pdf, build_report_model, pdf_filename
 from .storage import (
     cancel_scan as cancel_stored_scan,
     create_scan,
@@ -136,90 +138,6 @@ def _result_payload(result: dict[str, Any]) -> dict[str, Any]:
     if payload.get("created_at") is not None:
         payload["created_at"] = payload["created_at"].isoformat()
     return payload
-
-
-def _report_result_groups(results: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Shape raw checks into a compact report view.
-
-    The database keeps one row per DNS query. The browser groups those rows by
-    outcome so a large scan opens on its findings and summary instead of an
-    unbounded table.
-    """
-    definitions = [
-        ("listed", "Ocorrências encontradas", "listed", "Listagens que exigem análise operacional."),
-        ("not_listed", "Sem ocorrência", "clean", "Consultas concluídas sem resposta de listagem."),
-        ("whitelisted", "Respostas permitidas", "info", "Respostas classificadas como permitidas pela fonte."),
-        ("incomplete", "Consultas incompletas", "warning", "Timeouts e erros que reduzem a confiança do resultado."),
-    ]
-    buckets = {key: [] for key, *_ in definitions}
-    status_labels = {
-        "listed": "Listada",
-        "not_listed": "Sem ocorrência",
-        "whitelisted": "Permitida",
-        "timeout": "Timeout",
-        "error": "Erro",
-    }
-    status_tones = {
-        "listed": "listed",
-        "not_listed": "clean",
-        "whitelisted": "info",
-        "timeout": "warning",
-        "error": "warning",
-    }
-    for raw_result in results:
-        result = dict(raw_result)
-        status = str(result.get("status", "")).lower()
-        group_key = status if status in {"listed", "not_listed", "whitelisted"} else "incomplete"
-        answers = result.get("answers") or []
-        result["status_label"] = status_labels.get(status, status or "Indisponível")
-        result["status_tone"] = status_tones.get(status, "warning")
-        result["answers_text"] = ", ".join(str(answer) for answer in answers) or "—"
-        result["query_name"] = str(result.get("query_name", ""))
-        result["duration_label"] = f"{int(result.get('duration_ms') or 0)} ms"
-        buckets[group_key].append(result)
-
-    groups = []
-    for key, title, tone, description in definitions:
-        rows = buckets[key]
-        if key == "incomplete":
-            rows = [*buckets["incomplete"]]
-        groups.append(
-            {
-                "key": key,
-                "title": title,
-                "tone": tone,
-                "description": description,
-                "count": len(rows),
-                "results": rows,
-            }
-        )
-    featured = [row for row in buckets["listed"][:6]]
-    return [group for group in groups if group["count"]], featured
-
-
-def _report_stats(scan: dict[str, Any], results: list[dict[str, Any]]) -> dict[str, int | str]:
-    summary = scan.get("summary_json") if isinstance(scan.get("summary_json"), dict) else {}
-    listed_rows = [result for result in results if result.get("status") == "listed"]
-    unique_targets = {str(result.get("target_value", "")) for result in results if result.get("target_value")}
-    def number(key: str, fallback: int) -> int:
-        try:
-            return int(summary.get(key, fallback) or 0)
-        except (TypeError, ValueError):
-            return fallback
-
-    total_checks = number("total_checks", int(scan.get("total_checks") or len(results)))
-    completed_checks = int(scan.get("completed_checks") or len(results))
-    return {
-        "total_checks": total_checks,
-        "completed_checks": completed_checks,
-        "listed_ips": number("unique_ips_listed", len({str(row.get("target_value")) for row in listed_rows})),
-        "clean_ips": number("unique_ips_clean", max(number("unique_ips_scanned", len(unique_targets)) - len({str(row.get("target_value")) for row in listed_rows}), 0)),
-        "scanned_ips": number("unique_ips_scanned", len(unique_targets)),
-        "blacklists": number("unique_blacklists_hit", len({str(row.get("blacklist")) for row in listed_rows if row.get("blacklist")})),
-        "timeouts": number("timeout_results", sum(1 for row in results if row.get("status") == "timeout")),
-        "errors": number("error_results", sum(1 for row in results if row.get("status") == "error")),
-        "risk_level": str(summary.get("risk_level", "Indisponível")),
-    }
 
 
 def _admin_scans_token() -> str:
@@ -415,16 +333,16 @@ def scan_detail(scan_id: int):
     if not scan:
         abort(404)
     results = list_results(scan_id) if scan["status"] in {"succeeded", "failed", "canceled"} else []
-    result_groups, featured_results = _report_result_groups(results)
     selected_scan = _scan_payload(scan)
+    report_model = build_report_model(selected_scan, results)
     return render_template(
         "index.html",
         scans=[_scan_payload(item) for item in list_scans(str(user["sub"]))],
         selected_scan=selected_scan,
         results=results,
-        result_groups=result_groups,
-        featured_results=featured_results,
-        report_stats=_report_stats(selected_scan, results),
+        result_groups=report_model["groups"],
+        featured_results=report_model["featured"],
+        report_stats=report_model["stats"],
         app_env=app.config["APP_ENV"],
         suite_name=app.config["SUITE_NAME"],
         admin_base_url=app.config["ADMIN_BASE_URL"],
@@ -436,6 +354,29 @@ def scan_detail(scan_id: int):
             {"code": "admin_center", "name": "Admin Center", "url": app.config["ADMIN_BASE_URL"]},
             {"code": "isp_network_health", "name": "ISP Network Health", "url": url_for("index")},
         ],
+    )
+
+
+@app.get("/scans/<int:scan_id>/report.pdf")
+@_protected
+@limiter.limit("20 per hour")
+def scan_report_pdf(scan_id: int):
+    """Generate a self-contained PDF using the report's automatic block rules."""
+    _ensure_schema()
+    user = _user()
+    scan = get_scan(scan_id, str(user["sub"]))
+    if not scan:
+        abort(404)
+    if scan["status"] not in {"succeeded", "failed", "canceled"}:
+        flash("O PDF estará disponível quando a análise terminar.", "warning")
+        return redirect(url_for("scan_detail", scan_id=scan_id))
+    report = build_health_pdf(_scan_payload(scan), list_results(scan_id))
+    return send_file(
+        BytesIO(report),
+        mimetype="application/pdf",
+        as_attachment=True,
+        download_name=pdf_filename(scan),
+        max_age=0,
     )
 
 
