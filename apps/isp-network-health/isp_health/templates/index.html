@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='health.css') }}">
   <script src="{{ url_for('static', filename='health.js') }}" defer></script>
 </head>
-<body>
+<body class="{% if selected_scan %}has-selected-scan{% endif %}">
   <main class="shell">
     <header class="topbar">
       <div class="header-start">
@@ -29,12 +29,12 @@
       </div>
       <div class="form-actions"><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button" type="submit">Sair</button></form></div>
     </header>
-    <section class="heading">
+    <section class="heading page-heading">
       <div><p class="eyebrow">Diagnóstico operacional</p><h1>Saúde da sua rede</h1><p class="muted">Analise a reputação de domínios, IPv4, blocos CIDR e ASNs com execução em segundo plano.</p></div>
     </section>
-    {% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<p class="status status-{{ category }}">{{ message }}</p>{% endfor %}{% endwith %}
-    <div class="grid">
-      <section class="card">
+    <div class="flash-messages">{% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<p class="status status-{{ category }}">{{ message }}</p>{% endfor %}{% endwith %}</div>
+    <div class="grid setup-grid">
+      <section class="card setup-card">
         <div class="card-heading"><div><h2>Nova análise</h2><p class="muted">As consultas externas são executadas pelo worker.</p></div></div>
         <form method="post" action="{{ url_for('create_scan_route') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -43,12 +43,12 @@
           <div class="form-actions"><button class="button button-primary" type="submit">Enfileirar análise</button></div>
         </form>
       </section>
-      <section class="card">
+      <section class="card setup-card">
         <div class="card-heading"><div><h2>Regras da coleta</h2><p class="muted">O serviço aplica as mesmas regras do núcleo INH.</p></div></div>
         <ul class="muted"><li>Somente IPv4 público e globalmente roteável.</li><li>DNSBL, RDAP, WHOIS e fontes externas têm timeout.</li><li>Uma análise ativa por usuário.</li><li>Resultados ficam isolados por usuário.</li></ul>
       </section>
     </div>
-    <section class="card history">
+    <section class="card history scan-history">
       <div class="card-heading"><div><h2>Histórico recente</h2><p class="muted">Até 40 análises do usuário atual.</p></div></div>
       <div class="scan-list">
       {% for scan in scans %}
@@ -60,12 +60,29 @@
       </div>
     </section>
     {% if selected_scan %}
-    <section class="card detail">
-      <div class="card-heading"><div><p class="eyebrow">Resultado</p><h2>#{{ selected_scan.id }} · {{ selected_scan.target }}</h2></div><span class="status status-{{ selected_scan.status }}">{{ selected_scan.status }}</span></div>
-      <dl><dt>Perfil</dt><dd>{{ selected_scan.profile }}</dd><dt>Estado</dt><dd>{{ selected_scan.completed_checks }} de {{ selected_scan.total_checks }} verificações</dd>{% if selected_scan.error_message %}<dt>Erro</dt><dd>{{ selected_scan.error_message }}</dd>{% endif %}</dl>
-      {% if selected_scan.status in ['queued','running'] %}<p class="muted">Esta página atualiza automaticamente enquanto o worker processa a análise.</p><form method="post" action="{{ url_for('cancel_scan', scan_id=selected_scan.id) }}" class="detail-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit">Cancelar análise</button></form>{% endif %}
-      {% if selected_scan.summary_json %}<h3 class="summary-title">Resumo</h3><p class="muted">IPs analisados: {{ selected_scan.summary_json.get('unique_ips_scanned', 0) }} · IPs listados: {{ selected_scan.summary_json.get('unique_ips_listed', 0) }} · Risco: {{ selected_scan.summary_json.get('risk_level', 'indisponível') }}</p>{% endif %}
-      {% if results %}<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Alvo</th><th>Lista</th><th>Estado</th><th>Respostas</th></tr></thead><tbody>{% for result in results %}<tr><td>{{ result.target_value }}</td><td>{{ result.blacklist }}</td><td>{{ result.status }}</td><td>{{ result.answers|join(', ') }}</td></tr>{% endfor %}</tbody></table></div>{% endif %}
+    <section class="card detail report-card">
+      <div class="report-heading">
+        <div><p class="eyebrow">Relatório da análise</p><h2>#{{ selected_scan.id }} · {{ selected_scan.target }}</h2><p class="muted">Leitura executiva com os detalhes técnicos disponíveis nesta execução.</p></div>
+        <span class="status status-{{ selected_scan.status }}">{{ {'queued':'na fila','running':'executando','succeeded':'concluída','failed':'falhou','canceled':'cancelada'}.get(selected_scan.status, selected_scan.status) }}</span>
+      </div>
+      {% if selected_scan.status in ['succeeded','failed','canceled'] %}
+      <div class="report-actions" aria-label="Ações do relatório"><button class="button" type="button" data-report-expand>Expandir todos</button><button class="button" type="button" data-report-collapse>Colapsar todos</button><button class="button button-primary" type="button" data-report-print>Imprimir / salvar PDF</button></div>
+      {% endif %}
+      <dl class="report-meta"><dt>Perfil</dt><dd>{{ selected_scan.profile }}</dd><dt>Execução</dt><dd>{{ selected_scan.completed_checks }} de {{ selected_scan.total_checks }} verificações</dd>{% if selected_scan.started_at %}<dt>Início</dt><dd>{{ selected_scan.started_at }}</dd>{% endif %}{% if selected_scan.finished_at %}<dt>Fim</dt><dd>{{ selected_scan.finished_at }}</dd>{% endif %}{% if selected_scan.error_message %}<dt>Erro</dt><dd>{{ selected_scan.error_message }}</dd>{% endif %}</dl>
+      {% if selected_scan.status in ['queued','running'] %}<p class="muted">Esta página atualiza automaticamente enquanto o worker processa a análise.</p><form method="post" action="{{ url_for('cancel_scan', scan_id=selected_scan.id) }}" class="detail-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit">Cancelar análise</button></form>{% elif report_stats %}
+      <div class="report-kpis" aria-label="Indicadores da análise">
+        <div class="report-kpi"><span class="report-kpi-label">IPs analisados</span><strong>{{ report_stats.scanned_ips }}</strong><small>{{ report_stats.total_checks }} consultas totais</small></div>
+        <div class="report-kpi report-kpi-danger"><span class="report-kpi-label">IPs blacklistados</span><strong>{{ report_stats.listed_ips }}</strong><small>ocorrências relevantes</small></div>
+        <div class="report-kpi report-kpi-success"><span class="report-kpi-label">IPs sem listagem</span><strong>{{ report_stats.clean_ips }}</strong><small>resultado limpo</small></div>
+        <div class="report-kpi report-kpi-info"><span class="report-kpi-label">Blacklists acionadas</span><strong>{{ report_stats.blacklists }}</strong><small>{{ report_stats.risk_level }}</small></div>
+      </div>
+      <section class="report-summary-block"><div><p class="eyebrow">Resumo executivo</p><h3>Leitura rápida do resultado</h3><p class="muted">A análise concluiu {{ report_stats.completed_checks }} de {{ report_stats.total_checks }} verificações. Foram identificados {{ report_stats.listed_ips }} IPs com evidências de listagem e {{ report_stats.clean_ips }} IPs sem listagem nas consultas concluídas.</p></div><span class="risk-label risk-label-{{ selected_scan.summary_json.get('risk_level', 'indisponivel')|lower|replace(' ', '-') if selected_scan.summary_json else 'indisponivel' }}">{{ report_stats.risk_level }}</span></section>
+      {% if featured_results %}<section class="report-findings"><div class="report-section-heading"><div><p class="eyebrow">Prioridade</p><h3>Ocorrências em destaque</h3></div><span class="muted">{{ featured_results|length }} de {{ report_stats.listed_ips }} IPs</span></div><div class="finding-list">{% for result in featured_results %}<article class="finding-item"><div><strong>{{ result.target_value }}</strong><span>{{ result.blacklist }}</span></div><span class="result-status result-status-listed">{{ result.status_label }}</span></article>{% endfor %}</div></section>{% endif %}
+      {% if result_groups %}<section class="report-results"><div class="report-section-heading"><div><p class="eyebrow">Detalhamento técnico</p><h3>Resultados da verificação</h3><p class="muted">Abra somente o grupo que precisa investigar. A impressão do navegador expande todos automaticamente.</p></div></div><div class="result-groups">{% for group in result_groups %}<details class="result-group result-group-{{ group.tone }}" data-report-section><summary><span class="result-group-title"><strong>{{ group.title }}</strong><small>{{ group.description }}</small></span><span class="result-group-count">{{ group.count }} {% if group.count == 1 %}resultado{% else %}resultados{% endif %}</span></summary><div class="result-group-body"><div class="result-table-wrap"><table class="result-table"><thead><tr><th>Alvo</th><th>Blacklist / consulta</th><th>Estado</th><th>Resposta</th><th>Tempo</th></tr></thead><tbody>{% for result in group.results %}<tr><td><code>{{ result.target_value }}</code></td><td><strong>{{ result.blacklist }}</strong><small class="result-query">{{ result.query_name }}</small></td><td><span class="result-status result-status-{{ result.status_tone }}">{{ result.status_label }}</span></td><td class="result-answer">{{ result.answers_text }}</td><td>{{ result.duration_label }}</td></tr>{% endfor %}</tbody></table></div></div></details>{% endfor %}</div></section>{% endif %}
+      {% if report_stats.timeouts or report_stats.errors %}<p class="report-note report-note-warning">{{ report_stats.timeouts }} timeouts e {{ report_stats.errors }} erros ficaram fora da contagem de IPs listados. Revise o grupo “Consultas incompletas” antes de concluir a análise.</p>{% endif %}
+      {% else %}
+      <p class="muted">Esta análise ainda não possui um resultado final para exibir.</p>
+      {% endif %}
     </section>
     {% endif %}
   </main>

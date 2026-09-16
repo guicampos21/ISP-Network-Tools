@@ -1892,7 +1892,7 @@ def _blacklist_dropdown_html(row: dict[str, object]) -> str:
         return '<span class="muted">-</span>'
     count = len(names)
     return (
-        '<details class="blacklist-dropdown">'
+        '<details class="blacklist-dropdown" data-report-section>'
         f'<summary>Ver blacklists ({count})</summary>'
         f'<div class="blacklist-dropdown-body">{_blacklist_badges_html(row)}</div>'
         '</details>'
@@ -1901,7 +1901,7 @@ def _blacklist_dropdown_html(row: dict[str, object]) -> str:
 
 def _catalog_group_dropdown_html(scope_label: str, rows: list[str], total_items: int) -> str:
     return (
-        '<details class="catalog-dropdown">'
+        '<details class="catalog-dropdown" data-report-section>'
         f'<summary>{_original.html.escape(scope_label)} ({total_items})</summary>'
         '<div class="catalog-dropdown-body">'
         '<table><thead><tr><th>Blacklist</th><th>Tipo</th><th>Relevância</th><th>Descrição</th></tr></thead>'
@@ -2124,6 +2124,13 @@ def _report_replacements(lang: str | None = None) -> dict[str, str]:
             "Muito alto": "Very high",
             "Online": "Online",
             "Offline": "No response",
+            "Expandir resultados": "Expand results",
+            "Colapsar resultados": "Collapse results",
+            "Imprimir / salvar PDF": "Print / save PDF",
+            "Ver distribuição por bloco": "View block distribution",
+            "Ver inventário por IP": "View IP inventory",
+            "IPs analisados": "IPs analyzed",
+            "blocos": "blocks",
             "IPs online": "IPs online",
             "Total verificado": "Total checked",
             "Parte 1: DIRECT_IP_BLACKLISTS": "Part 1: Direct IP Blacklists",
@@ -2143,6 +2150,9 @@ def _report_replacements(lang: str | None = None) -> dict[str, str]:
         "Resultado exclusivo da consulta ASN-DROP.": "Resultado exclusivo da consulta ASN-DROP.",
         "Dados e graficos filtrados apenas por listas de carater informativo.": "Dados e gráficos filtrados apenas por listas de caráter informativo.",
         "Resumo visual da verificacao de disponibilidade dos enderecos IP inventariados.": "Resumo visual da verificação de disponibilidade dos endereços IP inventariados.",
+        "Expandir resultados": "Expandir resultados",
+        "Colapsar resultados": "Colapsar resultados",
+        "Imprimir / salvar PDF": "Imprimir / salvar PDF",
         "Offline": "Sem resposta",
     }
 
@@ -2261,26 +2271,6 @@ def _inject_report_enhancements(html_text: str, summary) -> str:
     .risk-low { background:var(--low); color:#fff; }
     """
     html_text = html_text.replace("</style>", f"{style}\n  </style>", 1)
-    print_details_script = """
-    <script>
-      let printDetailsState = [];
-      function expandDetailsForPrint() {
-        const details = Array.from(document.querySelectorAll("details"));
-        printDetailsState = details.map((node) => node.open);
-        details.forEach((node) => { node.open = true; });
-      }
-      function restoreDetailsAfterPrint() {
-        const details = Array.from(document.querySelectorAll("details"));
-        details.forEach((node, index) => {
-          node.open = Boolean(printDetailsState[index]);
-        });
-      }
-      window.addEventListener("beforeprint", expandDetailsForPrint);
-      window.addEventListener("afterprint", restoreDetailsAfterPrint);
-    </script>
-    """
-    html_text = html_text.replace("</head>", f"{print_details_script}\n</head>", 1)
-
     badge = _asn_drop_badge_html(summary)
     marker = '</div>\n      </div>\n      <div class="divider"></div>'
     if marker in html_text and '<div class="asn-drop-badge' not in html_text:
@@ -2533,8 +2523,12 @@ def _block_inventory_html(summary) -> str:
     return (
         '<section class="section">'
         '<h2>Inventário Geral de Blocos /24</h2>'
+        '<details class="report-collapse" data-report-section>'
+        f'<summary><span class="report-collapse-title"><strong>Ver distribuição por bloco</strong></span><span class="report-collapse-count">{len(rows)} blocos</span></summary>'
+        '<div class="report-collapse-body">'
         '<table><thead><tr><th>Bloco /24</th><th>IPs escaneados</th><th>IPs listados</th><th>Network Scope</th><th>Status</th></tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
+        '</div></details>'
         '</section>'
     )
 
@@ -2595,8 +2589,12 @@ def _inventory_section_html(summary) -> str:
         '<section class="section">'
         '<h2>Inventário Completo de IPs</h2>'
         '<p class="lead">Blacklists unificadas por IP, com destaque visual por relevância. Quando houver página útil de revisão/remocao, a própria tag da blacklist funciona como atalho.</p>'
+        '<details class="report-collapse" data-report-section>'
+        f'<summary><span class="report-collapse-title"><strong>Ver inventário por IP</strong></span><span class="report-collapse-count">{len(body)} IPs</span></summary>'
+        '<div class="report-collapse-body">'
         '<table><thead><tr><th>IP</th><th>Risco</th><th>Blacklists</th><th>Status</th></tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
+        '</div></details>'
         '</section>'
     )
 

@@ -1738,11 +1738,13 @@ def render_report_type2_html(summary: ScanSummary) -> str:
     bars_html = _render_bar_chart(summary.top_blacklists)
     heatmap_html = _render_heatmap(summary.inventory_rows)
     blacklist_sections = "".join(
-        '<section class="blacklist-section">'
-        f'<div class="section-head"><h3>{html.escape(group["name"])}</h3>{_render_badge(group["relevance"].upper(), "spamhaus" if "spamhaus" in group["name"] else "barracuda" if "barracuda" in group["name"] else "neutral")}<strong>{len(group["ips"])}</strong></div>'
+        '<details class="blacklist-section report-collapse" data-report-section>'
+        f'<summary><span class="report-collapse-title"><strong>{html.escape(group["name"])}</strong>{_render_badge(group["relevance"].upper(), "spamhaus" if "spamhaus" in group["name"] else "barracuda" if "barracuda" in group["name"] else "neutral")}</span><span class="report-collapse-count">{len(group["ips"])} IPs</span></summary>'
+        '<div class="report-collapse-body">'
         f'<div class="ip-grid">{"".join(f"<span class=\"ip-chip\">{html.escape(ip)}</span>" for ip in group["ips"])}</div>'
         '<div class="section-foot">Remocao/contestacao: verificar politica do mantenedor da blacklist.</div>'
-        '</section>'
+        '</div>'
+        '</details>'
         for group in summary.blacklist_groups
     )
     inventory_table = "".join(
@@ -1820,6 +1822,16 @@ def render_report_type2_html(summary: ScanSummary) -> str:
     .top-actions {{ display:flex; gap:12px; }}
     .btn {{ padding:10px 16px; border-radius:12px; border:1px solid var(--line-strong); background:var(--surface); color:var(--primary); font-weight:700; cursor:pointer; text-decoration:none; box-shadow:0 1px 0 rgba(15,23,42,.04); }}
     .btn.primary {{ background:var(--accent); color:#fff; border-color:var(--accent); }}
+    .report-collapse {{ border:1px solid var(--line-strong); border-radius:16px; background:var(--surface-soft); color:var(--text); overflow:hidden; }}
+    .report-collapse + .report-collapse {{ margin-top:10px; }}
+    .report-collapse > summary {{ display:flex; align-items:center; justify-content:space-between; gap:16px; padding:14px 16px; cursor:pointer; list-style:none; color:var(--primary); font-weight:800; }}
+    .report-collapse > summary::-webkit-details-marker {{ display:none; }}
+    .report-collapse > summary::before {{ content:"+"; display:grid; place-items:center; width:22px; height:22px; margin-right:2px; border:1px solid var(--line-strong); border-radius:7px; color:var(--accent); font-size:17px; line-height:1; flex:0 0 auto; }}
+    .report-collapse[open] > summary::before {{ content:"−"; }}
+    .report-collapse > summary > .report-collapse-title {{ display:flex; align-items:center; flex-wrap:wrap; gap:8px; min-width:0; margin-right:auto; }}
+    .report-collapse-count {{ color:var(--muted); font-size:11px; font-weight:700; white-space:nowrap; }}
+    .report-collapse-body {{ padding:0 16px 16px; }}
+    .report-collapse-body > table {{ margin-top:0; }}
     .report-shell {{ padding:24px 24px 36px; }}
     .report {{ width:min(238mm, calc(100vw - 48px)); min-height:297mm; margin:0 auto; background:var(--surface); padding:18mm 20mm 20mm 20mm; border-radius:22px; border:1px solid var(--line-strong); box-shadow:0 24px 60px rgba(15, 23, 42, 0.14); }}
     .divider {{ height:4px; background:linear-gradient(90deg,var(--primary),var(--accent)); border-radius:999px; margin:14px 0 18px; }}
@@ -1994,6 +2006,26 @@ def render_report_type2_html(summary: ScanSummary) -> str:
       preparePrintTheme();
       window.print();
     }}
+    function setReportDetails(open) {{
+      document.querySelectorAll("details").forEach((node) => {{ node.open = open; }});
+    }}
+    let printDetailsState = [];
+    function expandDetailsForPrint() {{
+      const details = Array.from(document.querySelectorAll("details"));
+      printDetailsState = details.map((node) => node.open);
+      details.forEach((node) => {{ node.open = true; }});
+    }}
+    function restoreDetailsAfterPrint() {{
+      const details = Array.from(document.querySelectorAll("details"));
+      details.forEach((node, index) => {{ node.open = Boolean(printDetailsState[index]); }});
+      printDetailsState = [];
+    }}
+    document.addEventListener("DOMContentLoaded", () => {{
+      document.querySelector("[data-report-expand]")?.addEventListener("click", () => setReportDetails(true));
+      document.querySelector("[data-report-collapse]")?.addEventListener("click", () => setReportDetails(false));
+    }});
+    window.addEventListener("beforeprint", expandDetailsForPrint);
+    window.addEventListener("afterprint", restoreDetailsAfterPrint);
   </script>
 </head>
 <body>
@@ -2002,7 +2034,9 @@ def render_report_type2_html(summary: ScanSummary) -> str:
     <div class="top-actions">
       <button class="btn" id="theme-toggle" onclick="toggleTheme()">Tema escuro</button>
       <a class="btn" href="{html.escape(json_file)}" download>Baixar JSON summary</a>
-      <button class="btn primary" onclick="exportPdf()">Exportar PDF</button>
+      <button class="btn" type="button" data-report-expand>Expandir resultados</button>
+      <button class="btn" type="button" data-report-collapse>Colapsar resultados</button>
+      <button class="btn primary" type="button" onclick="exportPdf()">Imprimir / salvar PDF</button>
     </div>
   </div>
   <div class="report-shell">
@@ -2073,13 +2107,17 @@ def render_report_type2_html(summary: ScanSummary) -> str:
     </section>
 
     <section class="section">
-      <h2>Inventário Completo de IPs</h2>
-      <table>
-        <thead>
-          <tr><th>IP</th><th>Blacklists relevantes</th><th>Listas informacionais</th><th>Nível de risco</th></tr>
-        </thead>
-        <tbody>{inventory_table}</tbody>
-      </table>
+      <details class="report-collapse" data-report-section>
+        <summary><span class="report-collapse-title"><strong>Inventário Completo de IPs</strong></span><span class="report-collapse-count">{summary.unique_ips_scanned} IPs analisados</span></summary>
+        <div class="report-collapse-body">
+          <table>
+            <thead>
+              <tr><th>IP</th><th>Blacklists relevantes</th><th>Listas informacionais</th><th>Nível de risco</th></tr>
+            </thead>
+            <tbody>{inventory_table}</tbody>
+          </table>
+        </div>
+      </details>
     </section>
 
     <section class="section method-grid">

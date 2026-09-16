@@ -38,3 +38,29 @@ if (appLauncher) {
     }
   });
 }
+
+const reportSections = () => [...document.querySelectorAll("details[data-report-section]")];
+const setReportSections = (open) => {
+  reportSections().forEach((section) => {
+    section.open = open;
+  });
+};
+
+document.querySelector("[data-report-expand]")?.addEventListener("click", () => setReportSections(true));
+document.querySelector("[data-report-collapse]")?.addEventListener("click", () => setReportSections(false));
+document.querySelector("[data-report-print]")?.addEventListener("click", () => window.print());
+
+let printSectionState = [];
+window.addEventListener("beforeprint", () => {
+  const sections = reportSections();
+  printSectionState = sections.map((section) => section.open);
+  sections.forEach((section) => {
+    section.open = true;
+  });
+});
+window.addEventListener("afterprint", () => {
+  reportSections().forEach((section, index) => {
+    section.open = Boolean(printSectionState[index]);
+  });
+  printSectionState = [];
+});
