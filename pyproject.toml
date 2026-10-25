@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "inh"
+version = "1.0.0"
+description = "INH - ISP Network Health"
+license = {text = "GPL-3.0-or-later"}
+readme = "README.md"
+requires-python = "==3.14.*"
+authors = [
+  { name = "Guilherme Campos", email = "guilherme@sentrixit.com" }
+]
+classifiers = [
+  "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+]
+
+[project.scripts]
+inh = "inh.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+license-files = ["LICENSE"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+inh = ["resources/help_text.txt", "resources/help_text_en.txt"]
