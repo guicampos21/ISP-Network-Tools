@@ -36,10 +36,8 @@ def test_admin_pages_render_without_internal_errors(client, app):
 def test_dashboard_has_no_manual_publish_or_zip_actions(client, app):
     login_as(client, app, "admin@example.test")
     dashboard = client.get("/").get_data(as_text=True)
-    blocks = client.get("/blocks").get_data(as_text=True)
     assert "Publicar agora" not in dashboard
     assert "Baixar prévia ZIP" not in dashboard
-    assert "Baixar prévia ZIP" in blocks
     assert client.get("/publish-direct").status_code == 404
 
 
@@ -147,18 +145,17 @@ def test_admin_block_edit_publishes_after_confirmation(client, app):
         assert Publication.query.one().version == 1
 
 
-def test_blocks_bulk_controls_use_direct_values_without_field_checkboxes(client, app):
+def test_legacy_blocks_route_uses_unified_ipam_inventory(client, app):
     login_as(client, app, "admin@example.test")
     response = client.get("/blocks")
     html = response.get_data(as_text=True)
     assert response.status_code == 200
+    assert "IPAM/Geofeed" in html
+    assert "Blocos e endereços IP" in html
+    assert 'aria-label="Escopo do inventário"' in html
+    assert "Atualização em massa" not in html
+    assert 'name="block_ids"' not in html
     assert 'name="fields"' not in html
-    assert 'name="active"' in html
-    assert 'name="company_id"' in html
-    assert 'name="asn"' in html
-    assert 'name="description"' in html
-    assert "data-change-review" in html
-    assert 'name="confirm_changes"' in html
 
 
 def test_settings_contains_access_tabs_and_graphical_avatar_options(client, app):
