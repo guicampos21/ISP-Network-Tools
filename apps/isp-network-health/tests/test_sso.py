@@ -22,6 +22,7 @@ class SsoHandoffTests(unittest.TestCase):
             role="admin",
             applications=["isp_network_health"],
             audience="isp_network_health",
+            profile="health_operator",
         )
         payload = verify_handoff(
             token,
@@ -30,6 +31,7 @@ class SsoHandoffTests(unittest.TestCase):
         )
         self.assertEqual(payload["sub"], "42")
         self.assertEqual(payload["email"], "operator@example.test")
+        self.assertEqual(payload["profile"], "health_operator")
 
     def test_tampered_or_wrong_audience_handoff_is_rejected(self):
         token = issue_handoff(

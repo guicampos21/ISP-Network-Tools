@@ -29,6 +29,15 @@ from urllib import request
 
 
 APP_NAME = "ISP Network Health"
+DNSBL_TEST_IPV4 = "127.0.0.2"
+
+
+def is_dnsbl_test_ipv4(value: str) -> bool:
+    """Return true only for the standard DNSBL test address."""
+    try:
+        return str(ipaddress.ip_address(value)) == DNSBL_TEST_IPV4
+    except ValueError:
+        return False
 
 BLACKLISTS = [
     "0spamurl.fusionzero.com",
@@ -204,6 +213,7 @@ BLACKLIST_EXCLUSIONS = {
 }
 BLACKLIST_PRIORITY = {
     "zen.spamhaus.org": "muito alta",
+    "dbl.spamhaus.org": "muito alta",
     "bl.spamcop.net": "muito alta",
     "b.barracudacentral.org": "alta",
     "bb.barracudacentral.org": "alta",
@@ -218,7 +228,12 @@ BLACKLIST_PRIORITY = {
     "psbl.surriel.com": "media",
 }
 BLACKLISTS = [entry for entry in BLACKLISTS if entry not in BLACKLIST_EXCLUSIONS]
-BLACKLIST_RELEVANCE = {entry: BLACKLIST_PRIORITY.get(entry, "informacional") for entry in BLACKLISTS}
+# DBL is a domain blocklist. Keep it out of the global IP DNSBL set so an IP
+# scan does not issue invalid reversed-IP queries against a domain list.
+DOMAIN_BLACKLISTS = [*BLACKLISTS, "dbl.spamhaus.org"]
+BLACKLIST_RELEVANCE = {
+    entry: BLACKLIST_PRIORITY.get(entry, "informacional") for entry in DOMAIN_BLACKLISTS
+}
 SUPPORTED_INPUT = (
     "dominio, IPv4 unico, bloco CIDR IPv4 ou ASN no formato ASxxxx "
     "(ex.: exemplo.com, 203.0.113.25, 203.0.113.0/28, AS15169)"
@@ -649,14 +664,18 @@ def is_domain(value: str) -> bool:
 
 
 def resolve_domain_ipv4s(domain: str) -> list[str]:
+    try:
+        records = socket.getaddrinfo(domain, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+    except socket.gaierror as exc:
+        if exc.errno in {socket.EAI_NONAME, getattr(socket, "EAI_NODATA", socket.EAI_NONAME)}:
+            return []
+        raise ValueError(f"Falha na resolucao DNS de {domain}.") from exc
     addresses = sorted(
         {
             item[4][0]
-            for item in socket.getaddrinfo(domain, None, family=socket.AF_INET, type=socket.SOCK_STREAM)
+            for item in records
         }
     )
-    if not addresses:
-        raise ValueError(f"Nao foi possivel resolver IPv4 para {domain}.")
     return addresses
 
 
@@ -665,7 +684,13 @@ def reverse_ipv4(ip_value: str) -> str:
 
 
 def run_dig(name: str, *, query_type: str | None = None) -> tuple[list[str], str]:
-    command = ["dig", f"+time={DNS_QUERY_TIME}", f"+tries={DNS_QUERY_TRIES}", "+short"]
+    command = ["dig", f"+time={DNS_QUERY_TIME}", f"+tries={DNS_QUERY_TRIES}", "+noall", "+answer", "+comments"]
+    resolver = os.getenv("HEALTH_DNS_SERVER", "").strip()
+    if resolver:
+        try:
+            command.append(f"@{ipaddress.ip_address(resolver)}")
+        except ValueError:
+            return [], "error"
     if query_type:
         command.extend(["-t", query_type])
     command.append(name)
@@ -681,17 +706,20 @@ def run_dig(name: str, *, query_type: str | None = None) -> tuple[list[str], str
     except subprocess.TimeoutExpired:
         return [], "timeout"
 
-    stdout_lines = [
-        line.strip()
-        for line in completed.stdout.splitlines()
-        if line.strip() and not line.lstrip().startswith(";")
-    ]
-    stderr_text = completed.stderr.strip().lower()
-    if "timed out" in stderr_text:
-        return stdout_lines, "timeout"
-    if completed.returncode != 0 and not stdout_lines:
+    combined = (completed.stdout + "\n" + completed.stderr).lower()
+    if "timed out" in combined or "no servers could be reached" in combined:
+        return [], "timeout"
+    response = re.search(r"status:\s*([A-Z]+)", completed.stdout)
+    if completed.returncode != 0 or not response or response.group(1) not in {"NOERROR", "NXDOMAIN"}:
         return [], "error"
-    return stdout_lines, "ok"
+    answers = []
+    for line in completed.stdout.splitlines():
+        if not line.strip() or line.lstrip().startswith(";"):
+            continue
+        fields = line.split(None, 4)
+        if len(fields) == 5 and fields[2] == "IN" and fields[3] == (query_type or "A"):
+            answers.append(fields[4].strip())
+    return answers, "ok"
 
 
 def format_detail_line(label: str, values: list[str], *, limit: int = 6) -> str:
@@ -1025,7 +1053,13 @@ def build_tasks(kind: str, value: str) -> tuple[list[CheckTask], list[str], str,
         )
 
     if kind == "domain":
-        resolved_ips = resolve_domain_ipv4s(value)
+        try:
+            resolved_ips = resolve_domain_ipv4s(value)
+        except ValueError:
+            # A domain can be valid for DBL/RHSBL checks without publishing an
+            # A record. In that case run domain-oriented checks and omit IP
+            # reputation checks that require a resolved address.
+            resolved_ips = []
         asn_context = build_asn_context_lines(resolved_ips[:8])
         asns, primary_prefix = safe_fetch_network_info(resolved_ips[0]) if resolved_ips else ([], "-")
         primary_asn = asns[0] if asns else "-"
@@ -1040,7 +1074,7 @@ def build_tasks(kind: str, value: str) -> tuple[list[CheckTask], list[str], str,
                 blacklist=blacklist,
                 label=f"Dominio {value}",
             )
-            for blacklist in BLACKLISTS
+            for blacklist in DOMAIN_BLACKLISTS
         ]
         for ip_value in resolved_ips:
             reversed_ip = reverse_ipv4(ip_value)
@@ -1056,6 +1090,8 @@ def build_tasks(kind: str, value: str) -> tuple[list[CheckTask], list[str], str,
                     )
                 )
         details = [format_detail_line("IPs resolvidos", resolved_ips), *asn_context[:4]]
+        if not resolved_ips:
+            details.insert(1, "Nenhum registro A encontrado; foram executadas consultas de reputacao do dominio.")
         return (
             tasks,
             details,
@@ -1153,10 +1189,26 @@ def execute_task(task: CheckTask) -> CheckResult:
     ipv4_answers = [answer for answer in answers if re.fullmatch(r"\d{1,3}(?:\.\d{1,3}){3}", answer)]
     if status == "ok" and ipv4_answers:
         first = ipv4_answers[0]
-        if task.target_kind == "ip" and first == "127.0.0.1":
+        if task.blacklist.endswith(".spamhaus.org") and any(
+            answer.startswith("127.255.255.")
+            or (task.blacklist == "dbl.spamhaus.org" and answer == "127.0.1.255")
+            for answer in ipv4_answers
+        ):
+            # Spamhaus uses these answers for policy/refusal responses. They
+            # are not evidence that the queried IP or domain is listed.
+            status = "error"
+        elif task.target_kind == "ip" and first == "127.0.0.1":
             status = "whitelisted"
         else:
             status = "listed"
+    elif status == "ok" and (
+        (task.blacklist == "zen.spamhaus.org" and task.target_kind == "ip" and is_dnsbl_test_ipv4(task.target_value))
+        or (task.blacklist == "dbl.spamhaus.org" and task.target_kind == "domain" and task.target_value == "dbltest.com")
+    ):
+        # Official positive probes should never be reported as clean when a
+        # resolver filters the zone or the provider does not authorize access.
+        status = "error"
+        ipv4_answers = ["O alvo de teste não retornou a resposta positiva esperada. Verifique filtros DNS e autorização de acesso ao provedor."]
     elif status == "ok":
         status = "not_listed"
     return CheckResult(task=task, status=status, answers=ipv4_answers, duration_ms=duration_ms)

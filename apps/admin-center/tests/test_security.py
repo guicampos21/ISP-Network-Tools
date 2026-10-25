@@ -1,3 +1,4 @@
+from geofeed_admin import create_app
 from geofeed_admin.models import Company, FeedEntry, NotificationLog, PortalSetting, Role, User, db
 import io
 import json
@@ -18,6 +19,40 @@ def test_security_headers_and_no_secret(client):
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Cache-Control"] == "no-store"
     assert "img-src 'self' data: blob:" in response.headers["Content-Security-Policy"]
+
+
+def test_oidc_identity_settings_from_database_reach_callback_config(app):
+    with app.app_context():
+        db.session.add_all([
+            PortalSetting(key="entra.tenant_id", value="tenant-from-database", is_secret=False),
+            PortalSetting(key="entra.client_id", value="client-from-database", is_secret=False),
+        ])
+        db.session.commit()
+
+    reloaded = create_app({
+        "TESTING": True,
+        "APP_ENV": "development",
+        "DEV_AUTH": True,
+        "SECRET_KEY": "test-secret-not-for-production",
+        "SQLALCHEMY_DATABASE_URI": app.config["SQLALCHEMY_DATABASE_URI"],
+        "DATABASE_PATH": app.config["DATABASE_PATH"],
+        "PUBLIC_ROOT": app.config["PUBLIC_ROOT"],
+        "BACKUP_ROOT": app.config["BACKUP_ROOT"],
+        "BRANDING_ROOT": app.config["BRANDING_ROOT"],
+        "AVATAR_ROOT": app.config["AVATAR_ROOT"],
+        "ADMIN_BASE_URL": app.config["ADMIN_BASE_URL"],
+        "PUBLIC_BASE_URL": app.config["PUBLIC_BASE_URL"],
+        "TRUSTED_HOSTS": ["localhost", "admin-center.example.test"],
+        "SESSION_COOKIE_SECURE": False,
+        "WTF_CSRF_ENABLED": False,
+        "RATELIMIT_ENABLED": False,
+        "ENTRA_CLIENT_SECRET": "test-client-secret",
+        "ENTRA_CLIENT_ID": "",
+        "ENTRA_TENANT_ID": "",
+    })
+
+    assert reloaded.config["ENTRA_TENANT_ID"] == "tenant-from-database"
+    assert reloaded.config["ENTRA_CLIENT_ID"] == "client-from-database"
 
 
 def test_profile_avatar_editor_exposes_three_modes_and_dicebear_styles(client, app):
@@ -88,7 +123,10 @@ def test_editor_cannot_manage_users(client, app):
     assert response.status_code == 403
 
 
-def test_admin_can_manage_users(client, app):
+def test_superadmin_can_manage_users(client, app):
+    with app.app_context():
+        User.query.filter_by(email="admin@example.test").one().role = "super_admin"
+        db.session.commit()
     login_as(client, app, "admin@example.test")
     response = client.get("/users")
     assert response.status_code == 200
@@ -114,7 +152,7 @@ def test_xss_is_escaped_by_template(client, app):
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in body
 
 
-def test_company_delete_requires_confirmation_and_cascades_active_objects(client, app):
+def test_company_delete_requires_confirmation_and_preserves_active_objects(client, app):
     login_as(client, app, "admin@example.test")
 
     confirmation = client.get("/companies/1/delete")
@@ -132,11 +170,12 @@ def test_company_delete_requires_confirmation_and_cascades_active_objects(client
     response = client.post("/companies/1/delete", data={"confirm": "yes"})
     assert response.status_code == 302
     with app.app_context():
-        assert Company.query.count() == 0
+        assert Company.query.count() == 1
+        assert Company.query.one().active is False
         from geofeed_admin.models import FeedEntry, NetworkBlock
 
-        assert NetworkBlock.query.count() == 0
-        assert FeedEntry.query.count() == 0
+        assert NetworkBlock.query.count() == 1
+        assert FeedEntry.query.count() == 1
 
 
 def test_csv_import_is_not_available(client, app):
@@ -188,7 +227,7 @@ def test_superadmin_local_user_has_username_policy_and_welcome_log(client, app):
         "email": "new.local@example.com",
         "first_name": "New",
         "last_name": "Local",
-        "role": "editor",
+        "role": "ipam_operator",
         "auth_type": "local",
         "password": "Strong-password-123!",
         "password_confirm": "Strong-password-123!",
@@ -311,7 +350,7 @@ def test_welcome_email_uses_model_eight_without_external_password_and_with_micro
             username="m365.user",
             display_name="M365 User",
             auth_provider="m365",
-            role="editor",
+            role="ipam_operator",
             active=True,
         )
         monkeypatch.setattr(notifications, "send_notification", fake_send)
@@ -341,7 +380,7 @@ def test_welcome_email_uses_outlook_safe_centered_layout_and_color_fallbacks(app
             username="outlook.layout",
             display_name="Outlook Layout",
             auth_provider="m365",
-            role="editor",
+            role="ipam_operator",
             active=True,
         )
         monkeypatch.setattr(notifications, "send_notification", fake_send)
@@ -371,7 +410,7 @@ def test_welcome_email_includes_password_only_for_local_account(app, monkeypatch
             username="local.welcome",
             display_name="Local Welcome",
             auth_provider="local",
-            role="editor",
+            role="ipam_operator",
             active=True,
         )
         monkeypatch.setattr(notifications, "send_notification", fake_send)
@@ -521,7 +560,7 @@ def test_external_user_creation_does_not_store_local_password(client, app):
     login_as(client, app, "admin@example.test")
     response = client.post("/users/new", data={
         "email": "external@example.com", "first_name": "External",
-        "last_name": "User", "role": "editor", "auth_type": "m365",
+        "last_name": "User", "role": "ipam_operator", "auth_type": "m365",
         "password": "should-not-be-used", "password_confirm": "should-not-be-used",
     })
     assert response.status_code == 302
@@ -573,7 +612,7 @@ def test_local_login_uses_username_and_requires_totp_setup(client, app):
                 display_name="Local User",
                 auth_provider="local",
                 password_hash=generate_password_hash("local-password-strong"),
-                role="editor",
+                role="ipam_operator",
                 active=True,
             )
         )
@@ -597,7 +636,7 @@ def test_local_totp_setup_completes_login_and_remembered_session(client, app):
             display_name="Local 2FA",
             auth_provider="local",
             password_hash=generate_password_hash("local-password-strong"),
-            role="editor",
+            role="ipam_operator",
             active=True,
         )
         db.session.add(user)
@@ -631,7 +670,7 @@ def test_last_admin_cannot_be_disabled(client, app):
     admin_id = login_as(client, app, "admin@example.test")
     response = client.post(
         f"/users/{admin_id}/edit",
-        data={"email": "admin@example.test", "display_name": "Admin", "username": "admin", "first_name": "Admin", "last_name": "User", "role": "editor"},
+        data={"email": "admin@example.test", "display_name": "Admin", "username": "admin", "first_name": "Admin", "last_name": "User", "role": "ipam_operator"},
         follow_redirects=True,
     )
     assert "último administrador" in response.get_data(as_text=True)

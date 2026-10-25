@@ -44,6 +44,10 @@ services:
       - /tmp
     cap_drop:
       - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
   isp-network-health:
     restart: always
     environment:

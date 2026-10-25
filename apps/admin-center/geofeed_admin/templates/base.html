@@ -7,11 +7,14 @@
   <meta name="theme-color" content="#0b0910">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>{% block title %}Admin Center{% endblock %} · {{ portal_branding.company_name }}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260915-suite-launcher') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css', v='20260923-ipam-hierarchy') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='vendor/leaflet/leaflet.css', v='20260917-map') }}">
+  <link rel="stylesheet" href="{{ url_for('suite_header_css', v='20260918-footer-4') }}">
   {% block head_extra %}{% endblock %}
-  <script src="{{ url_for('static', filename='app.js', v='20260915-suite-launcher') }}" defer></script>
+  <script src="{{ url_for('static', filename='vendor/leaflet/leaflet.js', v='20260917-map') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v='20260923-ipam-hierarchy') }}" defer></script>
 </head>
-<body style="--brand: {{ portal_branding.primary }}; --brand-2: {{ portal_branding.secondary }}; --brand-light: {{ portal_branding.accent }}; --portal-bg-start: {{ portal_branding.background_start }}; --portal-bg-end: {{ portal_branding.background_end }}; {% if portal_branding.gradient %}background: radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--brand) 20%, transparent), transparent 34rem), linear-gradient(145deg, var(--portal-bg-start), var(--portal-bg-end));{% else %}background: linear-gradient(145deg, var(--portal-bg-start), var(--portal-bg-end));{% endif %}">
+<body class="has-suite-footer" style="--brand: {{ portal_branding.primary }}; --brand-2: {{ portal_branding.secondary }}; --brand-light: {{ portal_branding.accent }}; --portal-bg-start: {{ portal_branding.background_start }}; --portal-bg-end: {{ portal_branding.background_end }}; {% if portal_branding.gradient %}background: radial-gradient(circle at 92% 0%, color-mix(in srgb, var(--brand) 20%, transparent), transparent 34rem), linear-gradient(145deg, var(--portal-bg-start), var(--portal-bg-end));{% else %}background: linear-gradient(145deg, var(--portal-bg-start), var(--portal-bg-end));{% endif %}">
   <a class="skip-link" href="#main-content">Pular para o conteúdo principal</a>
   <div class="topline"></div>
   {% if current_user %}
@@ -32,8 +35,8 @@
             <input type="search" data-launcher-search placeholder="Localizar aplicações da suíte" autocomplete="off">
           </label>
           <div class="launcher-grid" data-launcher-grid>
-          {% for application in suite_applications if application.available %}
-            <a class="launcher-item" data-launcher-item data-app-label="{{ application.name }}" href="{{ application.url }}">
+          {% for application in suite_applications|selectattr('available')|sort(attribute='name') %}
+            <a class="launcher-item" data-launcher-item data-app-label="{{ application.name }}" href="{{ application.url }}"{% if application.code == 'geofeed_public' %} target="_blank" rel="noopener noreferrer"{% endif %}>
               {{ app_icon(application.code) }}
               <span class="launcher-item-copy"><strong>{{ application.name }}</strong></span>
             </a>
@@ -43,27 +46,24 @@
         </div>
       </details>
       <a class="brand" href="{{ url_for('panel.dashboard') }}">
-        <span class="brand-mark" aria-hidden="true">I</span>
+        {{ app_icon('admin_center') }}
         <span><strong>Admin Center</strong><small>{{ portal_branding.suite_name }}</small></span>
       </a>
     </div>
     <button class="nav-toggle" type="button" data-nav-toggle aria-expanded="false">Menu</button>
     <nav class="nav" data-nav>
-      <a class="{{ 'is-active' if request.endpoint == 'panel.dashboard' else '' }}" href="{{ url_for('panel.dashboard') }}">Visão geral</a>
-      <a class="{{ 'is-active' if request.endpoint in ['panel.companies', 'panel.company_new', 'panel.company_edit'] else '' }}" href="{{ url_for('panel.companies') }}">Empresas</a>
-      <a class="{{ 'is-active' if request.endpoint in ['panel.blocks', 'panel.block_detail', 'panel.block_new', 'panel.block_edit'] else '' }}" href="{{ url_for('panel.blocks') }}">Blocos</a>
-      <a class="{{ 'is-active' if request.endpoint in ['panel.changes', 'panel.change_detail'] else '' }}" href="{{ url_for('panel.changes') }}">Aprovações</a>
-      <a class="{{ 'is-active' if request.endpoint in ['panel.history', 'panel.history_detail'] else '' }}" href="{{ url_for('panel.history') }}">Histórico</a>
-      <a class="{{ 'is-active' if request.endpoint in ['panel.monitoring', 'panel.monitoring_run'] else '' }}" href="{{ url_for('panel.monitoring') }}">Monitoramento</a>
+      <a class="{{ 'is-active' if request.endpoint == 'panel.dashboard' else '' }}" href="{{ url_for('panel.dashboard') }}">Dashboard</a>
+      <a class="{{ 'is-active' if request.endpoint in ['panel.catalog', 'panel.companies', 'panel.company_new', 'panel.company_edit', 'panel.company_delete', 'panel.customers', 'panel.ipam_customer_new', 'panel.ipam_customer_edit', 'panel.ipam_customer_delete', 'panel.pops_dcs', 'panel.ipam_pop_new', 'panel.ipam_pop_edit', 'panel.ipam_pop_delete', 'panel.services', 'panel.service_new', 'panel.service_edit', 'panel.service_delete'] else '' }}" href="{{ url_for('panel.catalog') }}">Cadastro</a>
       {% if current_user.is_admin() %}<a class="{{ 'is-active' if request.endpoint == 'panel.audit_logs' else '' }}" href="{{ url_for('panel.audit_logs') }}">Auditoria</a>{% endif %}
       {% if current_user.is_super_admin() %}<a class="{{ 'is-active' if request.endpoint == 'panel.settings' else '' }}" href="{{ url_for('panel.settings') }}">Configurações</a>{% endif %}
     </nav>
     <div class="account">
+      <time class="suite-clock" data-suite-clock datetime="" aria-label="Data e hora atual"></time>
       <div class="notification-menu"><button class="notification-link" type="button" data-notification-toggle aria-label="Notificações" aria-expanded="false" title="Notificações"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>{% if unread_notifications %}<span class="notification-badge">{{ unread_notifications if unread_notifications < 100 else '99+' }}</span>{% endif %}</button><div class="notification-popup" data-notification-popup hidden><div class="notification-popup-heading"><strong>Notificações</strong><a href="{{ url_for('panel.notifications') }}">Ver todas</a></div><div data-notification-list><p class="muted">Carregando…</p></div></div></div>
       <details class="account-menu">
         <summary class="account-trigger">
           {% if current_user_avatar %}<img class="account-avatar" src="{{ current_user_avatar }}" alt="Foto de {{ current_user.display_name or current_user.email }}">{% elif current_user.avatar_kind == 'builder' %}<img class="account-avatar" src="{{ url_for('panel.user_avatar', user_id=current_user.id) }}" alt="Avatar de {{ current_user.display_name or current_user.email }}">{% elif current_user.avatar_kind in avatar_preset_urls %}<img class="account-avatar" src="{{ avatar_preset_urls[current_user.avatar_kind] }}" alt="Avatar de {{ current_user.display_name or current_user.email }}">{% else %}<span class="account-avatar account-initials">{{ (current_user.display_name or current_user.email)[:1]|upper }}</span>{% endif %}
-          <span><strong>{{ current_user.nickname or current_user.display_name or current_user.email }}</strong><small>{{ {'super_admin':'Super admin','admin':'Administrador','editor':'Técnico'}.get(current_user.role, current_user.role) }}</small></span>
+          <span><strong>{{ current_user.nickname or current_user.display_name or current_user.email }}</strong><small>{{ {'super_admin':'Super admin','admin':'Administrador','ipam_operator':'Operador IPAM','health_operator':'Operador Network Health','viewer':'Consulta','editor':'Operador IPAM'}.get(current_user.role, current_user.role) }}</small></span>
         </summary>
         <div class="account-dropdown">
           <a href="{{ url_for('panel.profile') }}">Ver perfil</a>
@@ -75,15 +75,26 @@
   </header>
   {% endif %}
 
-  <main id="main-content" class="page{% if not current_user %} page-centered{% endif %}">
+  <main id="main-content" class="page{% if not current_user %} page-centered{% endif %}{% if request.endpoint == 'panel.dashboard' %} dashboard-page-shell{% endif %}">
+    {% set ipam_endpoints = ['panel.ipam', 'panel.ipam_equipment_new', 'panel.ipam_allocation_new', 'panel.ipam_allocation_edit', 'panel.ipam_allocation_delete', 'panel.blocks', 'panel.block_detail', 'panel.block_new', 'panel.block_edit', 'panel.block_delete', 'panel.block_review', 'panel.block_rdap', 'panel.entry_new', 'panel.entry_edit', 'panel.entry_delete', 'panel.changes', 'panel.change_detail', 'panel.change_submit', 'panel.history', 'panel.history_detail', 'panel.history_restore'] %}
+    {% set cadastro_endpoints = ['panel.catalog', 'panel.companies', 'panel.company_new', 'panel.company_edit', 'panel.company_delete', 'panel.customers', 'panel.ipam_customer_new', 'panel.ipam_customer_edit', 'panel.ipam_customer_delete', 'panel.pops_dcs', 'panel.ipam_pop_new', 'panel.ipam_pop_edit', 'panel.ipam_pop_delete', 'panel.services', 'panel.service_new', 'panel.service_edit', 'panel.service_delete'] %}
+    {% set show_internal_sidebar = current_user and (request.endpoint in ipam_endpoints or request.endpoint in cadastro_endpoints) %}
+    {% if show_internal_sidebar %}<div class="app-layout">
+      <aside class="app-sidebar" data-app-sidebar aria-label="Navegação interna">
+        <div class="app-sidebar-heading"><div><span class="app-sidebar-kicker">Aplicação</span><strong>{{ 'IPAM/Geofeed' if request.endpoint in ipam_endpoints else 'Cadastro' }}</strong></div><button class="app-sidebar-close" type="button" data-app-sidebar-close aria-label="Fechar menu interno">×</button></div>
+        {% if request.endpoint in ipam_endpoints %}
+        <nav class="app-sidebar-nav"><a class="{{ 'is-active' if request.endpoint.startswith('panel.ipam') or request.endpoint in ['panel.blocks', 'panel.block_detail', 'panel.block_new', 'panel.block_edit'] else '' }}" href="{{ url_for('panel.ipam') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16v14H4zM8 9h2M14 9h2M8 14h2M14 14h2"></path></svg>Inventário</a><a class="{{ 'is-active' if request.endpoint in ['panel.changes', 'panel.change_detail', 'panel.change_submit'] else '' }}" href="{{ url_for('panel.changes') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"></path></svg>Aprovações</a><a class="{{ 'is-active' if request.endpoint in ['panel.history', 'panel.history_detail'] else '' }}" href="{{ url_for('panel.history') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.3-5.7L4 8.5M4 4v4.5h4.5"></path></svg>Histórico</a></nav>
+        {% else %}
+        <nav class="app-sidebar-nav"><a class="{{ 'is-active' if request.endpoint in ['panel.services', 'panel.service_new', 'panel.service_edit', 'panel.service_delete'] else '' }}" href="{{ url_for('panel.services') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10h8M8 14h5"></path></svg>Catálogo de Serviços</a><a class="{{ 'is-active' if request.endpoint in ['panel.customers', 'panel.ipam_customer_new', 'panel.ipam_customer_edit', 'panel.ipam_customer_delete'] else '' }}" href="{{ url_for('panel.customers') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c.5-3.2 2.5-5 6-5s5.5 1.8 6 5M16 5a3 3 0 0 1 0 6M17 15c2.5.2 3.8 1.8 4 5"></path></svg>Clientes</a><a class="{{ 'is-active' if request.endpoint in ['panel.catalog', 'panel.companies', 'panel.company_new', 'panel.company_edit', 'panel.company_delete'] else '' }}" href="{{ url_for('panel.companies') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5l8-3 8 3v16M8 9h2M14 9h2M8 13h2M14 13h2M8 17h8"></path></svg>Empresas</a><a class="{{ 'is-active' if request.endpoint in ['panel.pops_dcs', 'panel.ipam_pop_new', 'panel.ipam_pop_edit', 'panel.ipam_pop_delete'] else '' }}" href="{{ url_for('panel.pops_dcs') }}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M9 13h6M9 17h6"></path></svg>POPs/DCs</a></nav>
+        {% endif %}
+      </aside>
+      <div class="app-main"><button class="app-sidebar-open" type="button" data-app-sidebar-open aria-expanded="false">Menu da aplicação</button>
+    {% endif %}
     {% with messages = get_flashed_messages(with_categories=true) %}
-      {% if messages %}
-      <div class="flash-stack" role="status">
-        {% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}
-      </div>
-      {% endif %}
+      {% if messages %}<div class="flash-stack" role="status">{% for category, message in messages %}<div class="flash flash-{{ category }}">{{ message }}</div>{% endfor %}</div>{% endif %}
     {% endwith %}
     {% block content %}{% endblock %}
+    {% if show_internal_sidebar %}</div></div>{% endif %}
   </main>
   {% if current_user %}
   <dialog class="change-review-dialog" data-change-review-dialog data-current-role="{{ current_user.role }}" aria-labelledby="change-review-title">
@@ -92,5 +103,11 @@
     <div class="change-review-actions"><button class="button button-secondary" type="button" data-change-review-cancel>Voltar e revisar</button><button class="button button-primary" type="button" data-change-review-confirm>Confirmar e publicar</button></div>
   </dialog>
   {% endif %}
+  <footer class="suite-footer">
+    <span>Desenvolvido por Guilherme Campos</span>
+    <a href="https://www.linkedin.com/in/guilherme-campos353/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn de Guilherme Campos" title="LinkedIn de Guilherme Campos">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 3.5a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2ZM3.5 9h3.4v11.5H3.5V9Zm5.5 0h3.3v1.6h.1c.5-.9 1.7-1.9 3.5-1.9 3.7 0 4.4 2.4 4.4 5.5v6.3h-3.5v-5.6c0-1.3 0-3-1.9-3s-2.1 1.5-2.1 2.9v5.7H9V9Z" /></svg>
+    </a>
+  </footer>
 </body>
 </html>

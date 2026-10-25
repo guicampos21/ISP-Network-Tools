@@ -33,13 +33,17 @@ def app_config() -> dict[str, object]:
         "APP_ENV": environment,
         "SUITE_NAME": os.getenv("SUITE_NAME", "ISP Network Tools").strip()[:120],
         "ADMIN_BASE_URL": os.getenv("ADMIN_BASE_URL", "http://admin-center.localhost").rstrip("/"),
+        "ADMIN_INTERNAL_BASE_URL": os.getenv("ADMIN_INTERNAL_BASE_URL", "http://admin-center:8080").rstrip("/"),
         "PUBLIC_BASE_URL": os.getenv("PUBLIC_BASE_URL", "http://geofeed.localhost").rstrip("/"),
-        "HEALTH_BASE_URL": os.getenv("HEALTH_BASE_URL", "http://network-health.localhost").rstrip("/"),
+        "HEALTH_BASE_URL": os.getenv(
+            "HEALTH_BASE_URL", "http://admin-center.localhost/network-health"
+        ).rstrip("/"),
         "REDIS_URL": os.getenv("REDIS_URL", "redis://redis:6379/1"),
         "TRUSTED_HOSTS": [
             item.strip()
             for item in os.getenv(
-                "TRUSTED_HOSTS", "network-health.localhost,localhost,127.0.0.1"
+                "TRUSTED_HOSTS",
+                "admin-center.localhost,isp-network-health,network-health.localhost,localhost,127.0.0.1",
             ).split(",")
             if item.strip()
         ],

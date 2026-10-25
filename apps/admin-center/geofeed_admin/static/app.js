@@ -1,5 +1,21 @@
 "use strict";
 
+const updateSuiteClocks = () => {
+  const now = new Date();
+  const parts = new Intl.DateTimeFormat("pt-BR", {
+    weekday: "long", day: "2-digit", month: "long", year: "numeric",
+    hour: "2-digit", minute: "2-digit", hour12: false,
+  }).formatToParts(now).reduce((values, part) => ({ ...values, [part.type]: part.value }), {});
+  const weekday = parts.weekday ? parts.weekday.charAt(0).toUpperCase() + parts.weekday.slice(1) : "";
+  const label = `${weekday}, ${parts.day} de ${parts.month} de ${parts.year} - ${parts.hour}:${parts.minute}`;
+  document.querySelectorAll("[data-suite-clock]").forEach((clock) => {
+    clock.textContent = label;
+    clock.dateTime = now.toISOString();
+  });
+};
+updateSuiteClocks();
+window.setInterval(updateSuiteClocks, 30000);
+
 document.querySelectorAll("form[data-confirm]").forEach((form) => form.addEventListener("submit", (event) => {
   if (!window.confirm(form.dataset.confirm || "Confirmar esta operação?")) event.preventDefault();
 }));
@@ -87,6 +103,19 @@ if (navButton && nav) navButton.addEventListener("click", () => {
   const open = nav.classList.toggle("is-open");
   navButton.setAttribute("aria-expanded", String(open));
 });
+const appSidebar = document.querySelector("[data-app-sidebar]");
+const appSidebarOpen = document.querySelector("[data-app-sidebar-open]");
+const appSidebarClose = document.querySelector("[data-app-sidebar-close]");
+const setAppSidebar = (open) => {
+  if (!appSidebar) return;
+  appSidebar.classList.toggle("is-open", open);
+  appSidebarOpen?.setAttribute("aria-expanded", String(open));
+};
+appSidebarOpen?.addEventListener("click", () => setAppSidebar(true));
+appSidebarClose?.addEventListener("click", () => setAppSidebar(false));
+document.addEventListener("click", (event) => {
+  if (appSidebar?.classList.contains("is-open") && !event.target.closest("[data-app-sidebar],[data-app-sidebar-open]")) setAppSidebar(false);
+});
 const appLauncher = document.querySelector("[data-app-launcher]");
 if (appLauncher) {
   const trigger = appLauncher.querySelector("[data-launcher-trigger]");
@@ -145,6 +174,41 @@ document.querySelectorAll("[data-rfc-toggle]").forEach((toggle) => {
   document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !popover.hidden) { close(); toggle.focus(); } });
 });
 document.querySelectorAll("select[data-auto-submit]").forEach((select) => select.addEventListener("change", () => select.form.submit()));
+const accessSchedule = document.querySelector("[data-access-schedule]");
+if (accessSchedule) {
+  const list = accessSchedule.querySelector("[data-window-list]");
+  const template = accessSchedule.querySelector("[data-window-template]");
+  const count = accessSchedule.querySelector("[data-window-count]");
+  const alwaysOpen = accessSchedule.querySelector("[data-access-24h]");
+  const addWindow = accessSchedule.querySelector("[data-add-window]");
+  const renumberWindows = () => {
+    const rows = [...(list?.querySelectorAll("[data-access-window]") || [])];
+    rows.forEach((row, index) => {
+      const title = row.querySelector(".window-heading strong");
+      if (title) title.textContent = `Janela ${index + 1}`;
+      row.querySelectorAll("input[type=checkbox]").forEach((input) => { input.name = `window_${index}_days`; if (!input.value) input.value = input.dataset.dayValue || ""; });
+      const times = row.querySelectorAll("input[type=time]");
+      if (times[0]) times[0].name = `window_${index}_start`;
+      if (times[1]) times[1].name = `window_${index}_end`;
+    });
+    if (count) count.value = String(rows.length);
+    return rows;
+  };
+  const removeWindow = (row) => { row.remove(); renumberWindows(); };
+  const bindRow = (row) => row.querySelector("[data-remove-window]")?.addEventListener("click", () => removeWindow(row));
+  list?.querySelectorAll("[data-access-window]").forEach(bindRow);
+  addWindow?.addEventListener("click", () => {
+    if (!template || alwaysOpen?.checked) return;
+    const row = template.content.cloneNode(true).firstElementChild;
+    list.append(row); bindRow(row); renumberWindows();
+  });
+  alwaysOpen?.addEventListener("change", () => {
+    if (alwaysOpen.checked) { list.replaceChildren(); if (count) count.value = "0"; if (addWindow) addWindow.disabled = true; }
+    else if (addWindow) addWindow.disabled = false;
+  });
+  renumberWindows();
+  if (alwaysOpen?.checked && addWindow) addWindow.disabled = true;
+}
 document.querySelectorAll("[data-select-all]").forEach((master) => master.addEventListener("change", () => {
   const form = master.closest("form");
   form?.querySelectorAll("[data-select-item]").forEach((item) => { item.checked = master.checked; });
@@ -450,7 +514,7 @@ if (rememberToggle && rememberLinks.length) {
   const escapeHtml = (value) => String(value).replace(/[&<>\"']/g, (char) => ({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[char]));
   const normalize = (value) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
   const ufCodes = {"11":"RO","12":"AC","13":"AM","14":"RR","15":"PA","16":"AP","17":"TO","21":"MA","22":"PI","23":"CE","24":"RN","25":"PB","26":"PE","27":"AL","28":"SE","29":"BA","31":"MG","32":"ES","33":"RJ","35":"SP","41":"PR","42":"SC","43":"RS","50":"MS","51":"MT","52":"GO","53":"DF"};
-  const map = L.map(container, {scrollWheelZoom: true, zoomControl: true, attributionControl: false, minZoom: 2, maxZoom: 12});
+  const map = L.map(container, {scrollWheelZoom: true, zoomControl: true, attributionControl: false, minZoom: 2, maxZoom: 19});
   L.control.attribution({prefix: false, position: "bottomright"}).addTo(map);
   L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -460,11 +524,13 @@ if (rememberToggle && rememberLinks.length) {
   const cityCoordinates = new Map();
   let stateLayer;
   const markerGroup = L.layerGroup().addTo(map);
+  const locationGroup = L.layerGroup().addTo(map);
   const markerIcon = (label, size) => L.divIcon({className: "map-count-marker-wrap", html: `<span class="map-count-marker" style="--marker-size:${size}px">${escapeHtml(label)}</span>`, iconSize: [size, size], iconAnchor: [size / 2, size / 2]});
 
   const currentLevel = () => map.getZoom() < 4 ? "macroregions" : (map.getZoom() < 7 ? "states" : "cities");
   const drawMarkers = () => {
     markerGroup.clearLayers();
+    locationGroup.clearLayers();
     const level = currentLevel();
     const items = (mapData[level] || []).map((item) => {
       let latlng = macroCoordinates[item.region];
@@ -503,6 +569,15 @@ if (rememberToggle && rememberLinks.length) {
       marker.bindTooltip(`<div class="map-tooltip-summary"><strong>${escapeHtml(names)}</strong><div class="map-tooltip-total">${format(total)} blocos</div>${companySummary}</div>`, {direction: "top", opacity: .96});
       marker.addTo(markerGroup);
     });
+    (mapData.locations || []).forEach((location) => {
+      const marker = L.circleMarker([location.latitude, location.longitude], {radius: 7, color: "#f4c95d", weight: 2, fillColor: "#7c32c7", fillOpacity: .95});
+      const details = [location.address && `Endereço: ${location.address}`, location.customer && `Cliente: ${location.customer}`, location.pop && `POP/DC: ${location.pop}`, location.equipment && `Equipamento: ${location.equipment}`].filter(Boolean).map(escapeHtml).join("<br>");
+      const detailedZoom = map.getZoom() >= 11;
+      const tooltip = `<strong>${escapeHtml(location.prefix)}</strong>${details ? `<br>${details}` : "<br>Endereço operacional não informado"}`;
+      marker.bindTooltip(tooltip, {direction: "top", opacity: .96, permanent: detailedZoom, className: "map-location-tooltip", offset: [0, -6]});
+      marker.bindPopup(tooltip, {maxWidth: 360});
+      marker.addTo(locationGroup);
+    });
     const title = level === "macroregions" ? "Macroregiões" : (level === "states" ? "Estados" : "Cidades");
     const levelElement = card.querySelector("[data-map-level]");
     if (levelElement) levelElement.textContent = `Visualização: ${title}`;
@@ -518,4 +593,852 @@ if (rememberToggle && rememberLinks.length) {
     loading?.remove(); drawMarkers();
   }).catch(() => { if (loading) loading.textContent = "Não foi possível carregar o mapa."; });
   map.on("zoomend moveend", drawMarkers);
+})();
+
+const initServicePicker = (picker) => {
+  if (!picker || picker.dataset.servicePickerReady) return;
+  const panel = picker.querySelector("[data-service-picker-panel]");
+  const selected = picker.querySelector("[data-selected-services]");
+  const empty = picker.querySelector("[data-no-selected-services]");
+  const toggle = picker.querySelector("[data-open-service-picker]");
+  const search = picker.querySelector("[data-service-search]");
+  const options = [...picker.querySelectorAll("[data-service-option]")];
+  const updateEmpty = () => { if (empty) empty.hidden = Boolean(selected?.querySelector("[data-selected-service]")); };
+  const addSelected = (checkbox) => {
+    if (!selected || selected.querySelector(`[data-selected-service][data-service-id="${CSS.escape(checkbox.value)}"]`)) return;
+    const option = checkbox.closest("[data-service-option]");
+    const title = option?.querySelector("strong")?.textContent?.trim() || "Serviço";
+    const row = document.createElement("div");
+    row.className = "selected-service-row"; row.dataset.selectedService = ""; row.dataset.serviceId = checkbox.value;
+    row.innerHTML = `<input type="hidden" name="service_ids" value="${checkbox.value}"><strong></strong><label><span class="sr-only"></span><select name="service_status_${checkbox.value}"><option value="suspended">Suspenso</option><option value="active" selected>Ativo</option><option value="canceled">Cancelado</option></select></label><button class="icon-button" type="button" data-remove-service aria-label="Remover serviço">×</button>`;
+    row.querySelector("strong").textContent = title; row.querySelector(".sr-only").textContent = `Status de ${title}`;
+    row.querySelector("select").setAttribute("aria-label", `Status de ${title}`);
+    row.querySelector("[data-remove-service]").addEventListener("click", () => { checkbox.checked = false; row.remove(); updateEmpty(); });
+    selected.append(row); updateEmpty();
+  };
+  options.forEach((option) => { const checkbox = option.querySelector("[data-service-checkbox]"); checkbox?.addEventListener("change", () => checkbox.checked ? addSelected(checkbox) : (selected.querySelector(`[data-selected-service][data-service-id="${CSS.escape(checkbox.value)}"]`)?.remove(), updateEmpty())); });
+  selected?.querySelectorAll("[data-remove-service]").forEach((button) => button.addEventListener("click", () => { const row = button.closest("[data-selected-service]"); const checkbox = picker.querySelector(`[data-service-checkbox][value="${CSS.escape(row.dataset.serviceId)}"]`); if (checkbox) checkbox.checked = false; row.remove(); updateEmpty(); }));
+  if (panel && toggle) {
+    panel.hidden = true;
+    toggle.setAttribute("aria-expanded", "false");
+    toggle.addEventListener("click", () => {
+      panel.hidden = !panel.hidden;
+      toggle.setAttribute("aria-expanded", String(!panel.hidden));
+      if (!panel.hidden) search?.focus();
+    });
+  }
+  search?.addEventListener("input", () => { const query = search.value.trim().toLocaleLowerCase(); options.forEach((option) => { option.hidden = Boolean(query) && !option.dataset.serviceName.includes(query); }); });
+  picker.dataset.servicePickerReady = "1"; updateEmpty();
+};
+
+// A service picker is used both in the page form and in dynamically loaded
+// quick-entry dialogs. Delegation keeps the behavior identical in both places:
+// clicking anywhere outside the picker closes only its option panel and keeps
+// the selected hidden inputs and status controls intact.
+document.addEventListener("click", (event) => {
+  document.querySelectorAll("[data-service-picker]").forEach((picker) => {
+    const panel = picker.querySelector("[data-service-picker-panel]");
+    const toggle = picker.querySelector("[data-open-service-picker]");
+    if (panel && !panel.hidden && !panel.contains(event.target) && !toggle?.contains(event.target)) {
+      panel.hidden = true;
+      toggle?.setAttribute("aria-expanded", "false");
+    }
+  });
+});
+
+document.querySelectorAll("[data-service-picker]").forEach(initServicePicker);
+window.initQuickServicePicker = initServicePicker;
+
+window.applyFieldExamples = (scope = document) => {
+  const examples = {name: "Ex.: Razão social ou nome identificável", code: "Ex.: POP-SP-01 ou serviço-link-ip-100", cnpj: "00.000.000/0000-00", address: "Ex.: Av. Paulista, 1000, 8º andar", city: "Ex.: São Paulo", state: "Ex.: SP", postal_code: "Ex.: 01310-100", contact_name: "Ex.: Maria Silva", contact_email: "Ex.: contato@empresa.com.br", email: "Ex.: usuario@empresa.com.br", contact_phone: "Ex.: (11) 3333-4444", phone: "Ex.: (11) 3333-4444", notes: "Ex.: Observações relevantes para a operação.", description: "Ex.: Descreva o recurso e sua finalidade.", prefix: "Ex.: 203.0.113.0/24", allocation_address: "Ex.: Rack 04, posição 12, sala técnica", latitude: "Ex.: -23.5505", longitude: "Ex.: -46.6333", default_asn: "Ex.: 64500", asn: "Ex.: 64500", vlan: "Ex.: 120", vrf: "Ex.: CLIENTES-SP"};
+  scope.querySelectorAll?.("form input, form textarea")?.forEach((field) => { if (field.placeholder || field.type === "hidden" || field.type === "checkbox" || field.type === "radio" || field.type === "file" || field.type === "submit") return; const key = field.name?.toLowerCase() || ""; const match = Object.keys(examples).find((candidate) => key === candidate || key.includes(candidate)); if (match) field.placeholder = examples[match]; });
+};
+
+const markMissingRequired = (field) => {
+  if (!field || field.disabled || field.type === "hidden") return;
+  const missing = !String(field.value || "").trim();
+  field.classList.toggle("is-required-missing", missing);
+  field.closest("label")?.classList.toggle("required-missing", missing);
+};
+window.highlightMissingRequired = (scope = document) => {
+  scope.querySelectorAll?.("form [required]")?.forEach(markMissingRequired);
+};
+document.addEventListener("invalid", (event) => markMissingRequired(event.target), true);
+document.addEventListener("input", (event) => {
+  if (event.target?.matches?.("[required]")) markMissingRequired(event.target);
+});
+document.addEventListener("change", (event) => {
+  if (event.target?.matches?.("[required]")) markMissingRequired(event.target);
+});
+
+(() => {
+  const examples = {
+    name: "Ex.: Razão social ou nome identificável",
+    code: "Ex.: POP-SP-01 ou serviço-link-ip-100",
+    cnpj: "00.000.000/0000-00",
+    address: "Ex.: Av. Paulista, 1000, 8º andar",
+    city: "Ex.: São Paulo",
+    state: "Ex.: SP",
+    postal_code: "Ex.: 01310-100",
+    contact_name: "Ex.: Maria Silva",
+    contact_email: "Ex.: contato@empresa.com.br",
+    email: "Ex.: usuario@empresa.com.br",
+    contact_phone: "Ex.: (11) 3333-4444",
+    phone: "Ex.: (11) 3333-4444",
+    notes: "Ex.: Observações relevantes para a operação.",
+    description: "Ex.: Descreva o recurso e sua finalidade.",
+    prefix: "Ex.: 203.0.113.0/24",
+    allocation_address: "Ex.: Rack 04, posição 12, sala técnica",
+    latitude: "Ex.: -23.5505",
+    longitude: "Ex.: -46.6333",
+    default_asn: "Ex.: 64500",
+    asn: "Ex.: 64500",
+    vlan: "Ex.: 120",
+    vrf: "Ex.: CLIENTES-SP",
+  };
+  document.querySelectorAll("form input, form textarea").forEach((field) => {
+    if (field.placeholder || field.type === "hidden" || field.type === "checkbox" || field.type === "radio" || field.type === "file" || field.type === "submit") return;
+    const key = field.name?.toLowerCase() || "";
+    const match = Object.keys(examples).find((candidate) => key === candidate || key.includes(candidate));
+    if (match) field.placeholder = examples[match];
+  });
+})();
+
+(() => {
+  const tables = document.querySelectorAll("main table");
+  const normalize = (value) => value.replace(/\s+/g, " ").trim().toLocaleLowerCase();
+  const funnelIcon = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 5h16l-6.5 7.2v5.3l-3 1.5v-6.8z"></path></svg>';
+  const closeFilterPopovers = (except = null) => {
+    document.querySelectorAll(".table-filter-popover:not([hidden])").forEach((popover) => {
+      if (popover === except) return;
+      popover.hidden = true;
+      popover._filterButton?.setAttribute("aria-expanded", "false");
+    });
+  };
+  tables.forEach((table) => {
+    const headers = [...table.querySelectorAll("thead th")];
+    const body = table.tBodies[0];
+    if (!body || !headers.length) return;
+    headers.forEach((header, index) => {
+      if (header.dataset.noTableEnhance === "true") return;
+      if (header.querySelector(".table-header-inner")) return;
+      const label = header.textContent.trim();
+      if (!label) return;
+      const allowFilter = header.dataset.noTableFilter !== "true";
+      const wrapper = document.createElement("span");
+      wrapper.className = "table-header-inner";
+      wrapper.innerHTML = `<button class="table-sort-button" type="button" title="Ordenar por ${label}"></button><span class="table-header-label"></span><button class="table-filter-button" type="button" title="Filtrar por ${label}" aria-label="Filtrar por ${label}">⌄</button><div class="table-filter-popover" hidden><input type="search" placeholder="Filtrar ${label}" aria-label="Filtrar ${label}"><button type="button" class="table-filter-clear">Limpar</button></div>`;
+      wrapper.querySelector(".table-header-label").textContent = label;
+      const filterMarkup = allowFilter ? `<button class="table-filter-button" type="button" title="Filtrar por ${label}" aria-label="Filtrar por ${label}" aria-expanded="false">${funnelIcon}</button><div class="table-filter-popover" hidden><div class="table-filter-box"><label class="table-filter-label">Filtrar por <span></span></label><input type="search" placeholder="Digite para filtrar" autocomplete="off"><div class="table-filter-actions"><button type="button" class="table-filter-apply">Aplicar</button><button type="button" class="table-filter-clear">Limpar</button></div></div></div>` : "";
+      wrapper.innerHTML = `<button class="table-sort-button" type="button" title="Ordenar por ${label}" aria-label="Ordenar por ${label}"></button><span class="table-header-label"></span>${filterMarkup}`;
+      wrapper.querySelector(".table-header-label").textContent = label;
+      if (allowFilter) {
+        wrapper.querySelector(".table-filter-label span").textContent = label;
+        wrapper.querySelector(".table-filter-popover input").setAttribute("aria-label", `Filtrar por ${label}`);
+      }
+      header.textContent = "";
+      header.append(wrapper);
+      const sort = wrapper.querySelector(".table-sort-button");
+      let direction = 1;
+      sort.addEventListener("click", () => {
+        const rows = [...body.rows].filter((row) => row.cells.length > index);
+        rows.sort((left, right) => normalize(left.cells[index].textContent).localeCompare(normalize(right.cells[index].textContent), "pt-BR", {numeric: true}) * direction);
+        rows.forEach((row) => body.append(row));
+        direction *= -1;
+      });
+      if (!allowFilter) return;
+      const filter = wrapper.querySelector(".table-filter-button");
+      const popover = wrapper.querySelector(".table-filter-popover");
+      const input = popover.querySelector("input");
+      const applyButton = popover.querySelector(".table-filter-apply");
+      const clearButton = popover.querySelector(".table-filter-clear");
+      document.body.append(popover);
+      popover._filterButton = filter;
+      let appliedQuery = "";
+      const positionPopover = () => {
+        if (popover.hidden) return;
+        const buttonBox = filter.getBoundingClientRect();
+        const popoverBox = popover.getBoundingClientRect();
+        const margin = 12;
+        const left = Math.min(Math.max(margin, buttonBox.right - popoverBox.width), window.innerWidth - popoverBox.width - margin);
+        const below = buttonBox.bottom + 8;
+        const above = buttonBox.top - popoverBox.height - 8;
+        const top = below + popoverBox.height + margin <= window.innerHeight || above < margin ? below : above;
+        popover.style.left = `${Math.round(left)}px`;
+        popover.style.top = `${Math.round(Math.max(margin, top))}px`;
+      };
+      const applyFilter = () => {
+        const query = normalize(appliedQuery);
+        [...body.rows].forEach((row) => { row.hidden = Boolean(query) && !normalize(row.cells[index]?.textContent || "").includes(query); });
+        filter.classList.toggle("is-active", Boolean(query));
+        filter.setAttribute("aria-pressed", String(Boolean(query)));
+      };
+      const closePopover = () => {
+        popover.hidden = true;
+        filter.setAttribute("aria-expanded", "false");
+      };
+      filter.addEventListener("click", (event) => {
+        event.stopPropagation();
+        closeFilterPopovers(popover);
+        popover.hidden = !popover.hidden;
+        filter.setAttribute("aria-expanded", String(!popover.hidden));
+        if (!popover.hidden) {
+          input.value = appliedQuery;
+          input.focus();
+          requestAnimationFrame(positionPopover);
+        }
+      });
+      window.addEventListener("resize", positionPopover);
+      window.addEventListener("scroll", positionPopover, true);
+      applyButton.addEventListener("click", () => {
+        appliedQuery = input.value;
+        applyFilter();
+        closePopover();
+      });
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          applyButton.click();
+        }
+      });
+      clearButton.addEventListener("click", () => {
+        input.value = "";
+        appliedQuery = "";
+        applyFilter();
+        closePopover();
+      });
+    });
+  });
+  document.addEventListener("click", (event) => {
+    if (event.target.closest(".table-filter-popover, .table-filter-button")) return;
+    closeFilterPopovers();
+  });
+})();
+
+(() => {
+  const table = document.querySelector("[data-ipam-tree]");
+  if (!table) return;
+  const expanded = new Set();
+  const loaded = new Set();
+  const rows = () => [...table.querySelectorAll("[data-ipam-row], [data-ipam-child-toolbar]")];
+  const rowMap = () => new Map([...table.querySelectorAll("[data-ipam-row]")].map((row) => [row.dataset.nodeKey, row]));
+  const isVisible = (row, byKey) => {
+    let parentKey = row.dataset.parentKey || "";
+    while (parentKey) {
+      if (!expanded.has(parentKey)) return false;
+      const parent = byKey.get(parentKey);
+      if (!parent) break;
+      parentKey = parent.dataset.parentKey || "";
+    }
+    return true;
+  };
+  const render = () => {
+    const byKey = rowMap();
+    rows().forEach((row) => {
+      row.classList.toggle("ipam-tree-hidden", !isVisible(row, byKey));
+      const button = row.querySelector("[data-ipam-tree-toggle]");
+      if (!button || button.dataset.ipamHasChildren !== "true") return;
+      const open = expanded.has(row.dataset.nodeKey);
+      button.setAttribute("aria-expanded", String(open));
+      button.title = open ? "Recolher itens filhos" : "Abrir itens filhos";
+      const chevron = button.querySelector(".ipam-tree-chevron");
+      if (chevron) chevron.textContent = open ? "⌄" : "›";
+    });
+  };
+  table.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-ipam-tree-toggle]");
+    if (!button) return;
+    if (button.dataset.ipamHasChildren !== "true") {
+      if (button.dataset.ipamResourceAction) {
+        const link = document.createElement("a");
+        link.href = button.dataset.ipamResourceAction;
+        link.dataset.quickCreate = "";
+        link.hidden = true;
+        document.body.append(link);
+        link.click();
+        window.setTimeout(() => link.remove(), 0);
+      }
+      return;
+    }
+    const row = button.closest("[data-ipam-row]");
+    const key = row?.dataset.nodeKey;
+    if (!key) return;
+    if (expanded.has(key)) {
+      expanded.delete(key);
+      render();
+      return;
+    }
+    if (!loaded.has(key)) {
+      button.classList.add("is-loading");
+      button.setAttribute("aria-busy", "true");
+      const url = new URL(table.dataset.ipamTreeUrl, window.location.href);
+      url.searchParams.set("owner_id", row.dataset.ownerId);
+      url.searchParams.set("parent_prefix", row.dataset.prefix);
+      url.searchParams.set("parent_key", key);
+      url.searchParams.set("depth", row.dataset.depth || "0");
+      try {
+        const response = await fetch(url, {credentials: "same-origin", headers: {Accept: "text/html"}});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const template = document.createElement("template");
+        template.innerHTML = await response.text();
+        row.after(template.content);
+        loaded.add(key);
+      } catch (_error) {
+        window.alert("Não foi possível carregar os itens filhos. Tente novamente.");
+        return;
+      } finally {
+        button.classList.remove("is-loading");
+        button.removeAttribute("aria-busy");
+      }
+    }
+    expanded.add(key);
+    render();
+  });
+  render();
+
+  const openPlanner = async (button) => {
+    const parentPrefix = button.dataset.parentPrefix;
+    const parentLength = Number(parentPrefix.split("/").pop());
+    const dialog = document.createElement("dialog");
+    dialog.className = "quick-entry-dialog subnet-planner-dialog";
+    const options = Array.from({length: Math.max(0, 32 - parentLength)}, (_item, index) => parentLength + index + 1)
+      .map((length) => `<option value="${length}">/${length} · ${2 ** (32 - length)} endereços</option>`).join("");
+    dialog.innerHTML = `<div class="quick-entry-dialog-inner"><header class="quick-entry-dialog-header"><div><p class="eyebrow">Cálculo de sub-rede</p><h2>Criar bloco filho em ${parentPrefix}</h2></div><button class="dialog-close" type="button" aria-label="Fechar">×</button></header><div class="subnet-planner-body"><label><span>Tamanho do novo bloco</span><select data-subnet-size>${options}</select></label><div class="subnet-planner-status" data-subnet-status>Calculando faixas disponíveis…</div><div class="subnet-suggestions" data-subnet-suggestions></div><div class="form-actions"><button class="button button-secondary" type="button" data-planner-cancel>Cancelar</button><a class="button button-primary is-disabled" aria-disabled="true" data-planner-create>Cadastrar bloco</a></div></div></div>`;
+    document.body.append(dialog);
+    const size = dialog.querySelector("[data-subnet-size]");
+    const status = dialog.querySelector("[data-subnet-status]");
+    const suggestions = dialog.querySelector("[data-subnet-suggestions]");
+    const create = dialog.querySelector("[data-planner-create]");
+    const load = async () => {
+      status.textContent = "Calculando faixas disponíveis…";
+      suggestions.replaceChildren();
+      create.classList.add("is-disabled");
+      create.setAttribute("aria-disabled", "true");
+      create.removeAttribute("href");
+      const url = new URL(table.dataset.ipamSuggestionsUrl, window.location.href);
+      url.searchParams.set("owner_id", button.dataset.ownerId);
+      url.searchParams.set("parent_prefix", parentPrefix);
+      url.searchParams.set("prefixlen", size.value);
+      try {
+        const response = await fetch(url, {credentials: "same-origin", headers: {Accept: "application/json"}});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json();
+        status.textContent = payload.suggestions.length
+          ? `${payload.suggestions.length} faixa(s) alinhada(s) disponível(is). Prefixos idênticos já existentes foram excluídos; IPs e grupos menores podem ser reunidos.`
+          : "Não há faixa livre deste tamanho dentro do bloco selecionado.";
+        payload.suggestions.forEach((prefix, index) => {
+          const label = document.createElement("label");
+          label.className = "subnet-suggestion";
+          label.innerHTML = `<input type="radio" name="subnet_suggestion" value="${prefix}" ${index === 0 ? "checked" : ""}><span><strong>${prefix}</strong><small>Alinhamento validado</small></span>`;
+          suggestions.append(label);
+        });
+        const updateCreate = () => {
+          const selected = suggestions.querySelector("input:checked")?.value;
+          if (!selected) return;
+          const target = new URL("/ipam/allocations/new", window.location.origin);
+          target.searchParams.set("resource_kind", "block");
+          target.searchParams.set("prefix", selected);
+          target.searchParams.set("parent_id", button.dataset.parentId);
+          if (button.dataset.companyId) target.searchParams.set("company_id", button.dataset.companyId);
+          if (button.dataset.sourceBlockId) target.searchParams.set("source_block_id", button.dataset.sourceBlockId);
+          create.href = target.toString();
+          create.dataset.quickCreate = "";
+          create.classList.remove("is-disabled");
+          create.removeAttribute("aria-disabled");
+        };
+        suggestions.addEventListener("change", updateCreate);
+        updateCreate();
+      } catch (_error) {
+        status.textContent = "Não foi possível calcular as sub-redes. Tente novamente.";
+      }
+    };
+    size.addEventListener("change", load);
+    dialog.querySelector(".dialog-close").addEventListener("click", () => dialog.close());
+    dialog.querySelector("[data-planner-cancel]").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => dialog.remove());
+    dialog.showModal();
+    await load();
+  };
+  table.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-subnet-planner]");
+    if (button) openPlanner(button);
+  });
+})();
+
+window.initIpamEquipmentForm = (form) => {
+  if (!form || form.dataset.equipmentInitialized === "1") return;
+  form.dataset.equipmentInitialized = "1";
+  const type = form.elements.equipment_type;
+  const pop = form.elements.pop_id;
+  const customer = form.elements.customer_id;
+  const updateOptions = () => {
+    const typeValue = type?.value || "";
+    const popValue = pop?.value || "";
+    const customerValue = customer?.value || "";
+    form.querySelectorAll("select[name=router_id], select[name=secondary_router_id]").forEach((select) => {
+      select.querySelectorAll("option[data-pop-id]").forEach((option) => {
+        option.hidden = Boolean(popValue && option.dataset.popId && option.dataset.popId !== popValue);
+      });
+      if (select.selectedOptions[0]?.hidden) select.value = "";
+    });
+    form.querySelectorAll("select[name=cpe_id]").forEach((select) => {
+      select.querySelectorAll("option[data-customer-id]").forEach((option) => {
+        option.hidden = Boolean(customerValue && option.dataset.customerId && option.dataset.customerId !== customerValue);
+      });
+      if (select.selectedOptions[0]?.hidden) select.value = "";
+    });
+    form.querySelectorAll("select[name=access_point_id]").forEach((select) => {
+      select.querySelectorAll("option[data-pop-id]").forEach((option) => {
+        option.hidden = Boolean(popValue && option.dataset.popId && option.dataset.popId !== popValue) || Boolean(customerValue && option.dataset.customerId && option.dataset.customerId !== customerValue);
+      });
+      if (select.selectedOptions[0]?.hidden) select.value = "";
+    });
+    const accessPoint = form.elements.access_point_id;
+    if (typeValue === "radio_st" && accessPoint?.selectedOptions[0]?.dataset.popId && pop) {
+      pop.value = accessPoint.selectedOptions[0].dataset.popId;
+      pop.disabled = true;
+    } else if (pop) {
+      pop.disabled = false;
+    }
+  };
+  const updateVisibility = () => {
+    const typeValue = type?.value || "";
+    const show = (selector, visible, required = false) => {
+      const wrapper = form.querySelector(selector);
+      if (!wrapper) return;
+      wrapper.hidden = !visible;
+      const field = wrapper.querySelector("select, input, textarea");
+      if (field) field.required = Boolean(visible && required);
+    };
+    show("[data-equipment-pop-field]", typeValue !== "radio_st", ["router", "switch", "edge_router", "radio_ap"].includes(typeValue));
+    show("[data-equipment-secondary-pop-field]", typeValue === "cpe");
+    show("[data-equipment-customer-field]", ["cpe", "radio_ap", "radio_st"].includes(typeValue), ["cpe", "radio_ap", "radio_st"].includes(typeValue));
+    show("[data-equipment-router-field]", typeValue === "cpe");
+    show("[data-equipment-secondary-router-field]", typeValue === "cpe");
+    show("[data-equipment-cpe-field]", typeValue === "radio_st", true);
+    show("[data-equipment-ap-field]", typeValue === "radio_st", true);
+    updateOptions();
+  };
+  type?.addEventListener("change", updateVisibility);
+  pop?.addEventListener("change", updateOptions);
+  customer?.addEventListener("change", updateOptions);
+  updateVisibility();
+};
+
+window.initIpamAllocationForm = (form) => {
+  if (!form || form.dataset.ipamAllocationInitialized === "1") return;
+  form.dataset.ipamAllocationInitialized = "1";
+  const summary = form.querySelector("[data-ipam-data-summary]");
+  const valueOrFallback = (value, fallback = "Não informado") => String(value ?? "").trim() || fallback;
+  const parentContexts = (() => {
+    try { return JSON.parse(form.dataset.ipamParentContexts || "{}"); } catch (_) { return {}; }
+  })();
+  const inheritedFields = ["company_id", "geofeed_region", "vlan", "vrf", "customer_id", "pop_id", "pop_2_id", "access_type", "access_type_2", "router_id", "router_2_id", "switch_id", "switch_2_id", "cpe_id", "access_point_id", "access_point_2_id", "st_id", "st_2_id"];
+  const updateParentRequirement = () => {
+    const kind = form.elements.resource_kind?.value || "block";
+    const raw = form.elements.prefix?.value?.trim() || "";
+    const match = raw.match(/\/(\d+)$/);
+    const prefixLength = match ? Number(match[1]) : (kind === "ip" ? 32 : 0);
+    const version = raw.includes(":") ? 6 : 4;
+    const required = kind === "ip" || (version === 4 && prefixLength > 24) || (version === 6 && prefixLength > 32);
+    const field = form.elements.parent_id;
+    if (field) {
+      field.required = required;
+      field.closest("label")?.classList.toggle("is-conditionally-required", required);
+      const mark = form.querySelector("[data-ipam-parent-required-mark]");
+      if (mark) mark.hidden = !required;
+      markMissingRequired(field);
+    }
+  };
+  const updateSummary = () => {
+    if (!summary) return;
+    const prefixOutput = summary.querySelector("[data-summary-prefix]");
+    if (prefixOutput) prefixOutput.textContent = valueOrFallback(form.elements.prefix?.value);
+    summary.querySelectorAll("[data-summary-field]").forEach((output) => {
+      const field = form.elements[output.dataset.summaryField];
+      output.textContent = valueOrFallback(field?.value, "—");
+    });
+    summary.querySelectorAll("[data-summary-select]").forEach((output) => {
+      const field = form.elements[output.dataset.summarySelect];
+      output.textContent = field?.selectedOptions?.[0]?.textContent?.trim() || "Não informado";
+    });
+  };
+  const targetIsPublic = () => {
+    const raw = String(form.elements.prefix?.value || "").trim().split("/")[0];
+    if (!raw) return false;
+    if (raw.includes(":")) {
+      const normalized = raw.toLowerCase();
+      return !normalized.startsWith("fc") && !normalized.startsWith("fd") && !normalized.startsWith("fe8") && normalized !== "::1";
+    }
+    const octets = raw.split(".").map(Number);
+    if (octets.length !== 4 || octets.some((value) => !Number.isInteger(value) || value < 0 || value > 255)) return false;
+    const [first, second] = octets;
+    const reservedTestNetwork = (first === 192 && second === 0) || (first === 198 && second === 51) || (first === 203 && second === 0);
+    return first !== 10 && !(first === 172 && second >= 16 && second <= 31) && !(first === 192 && second === 168)
+      && !(first === 169 && second === 254) && !reservedTestNetwork
+      && first !== 127 && first !== 0 && first < 224;
+  };
+  const filterOptions = () => {
+    const customerId = form.elements.customer_id?.value || "";
+    [1, 2].forEach((approach) => {
+      const pop = form.querySelector(`[name="${approach === 1 ? "pop_id" : "pop_2_id"}"]`);
+      const popId = pop?.value || "";
+      const router = form.querySelector(`[name="${approach === 1 ? "router_id" : "router_2_id"}"]`);
+      const switchField = form.querySelector(`[name="${approach === 1 ? "switch_id" : "switch_2_id"}"]`);
+      const ap = form.querySelector(`[name="${approach === 1 ? "access_point_id" : "access_point_2_id"}"]`);
+      const st = form.querySelector(`[name="${approach === 1 ? "st_id" : "st_2_id"}"]`);
+      [router, switchField].forEach((field) => {
+        field?.querySelectorAll("option[data-pop-id]").forEach((option) => { option.hidden = Boolean(popId && option.dataset.popId && option.dataset.popId !== popId); });
+        if (field?.selectedOptions[0]?.hidden) field.value = "";
+      });
+      ap?.querySelectorAll("option[data-pop-id]").forEach((option) => {
+        option.hidden = Boolean(popId && option.dataset.popId && option.dataset.popId !== popId) || Boolean(customerId && option.dataset.customerId && option.dataset.customerId !== customerId);
+      });
+      if (ap?.selectedOptions[0]?.hidden) ap.value = "";
+      st?.querySelectorAll("option[data-pop-id]").forEach((option) => {
+        option.hidden = Boolean(popId && option.dataset.popId && option.dataset.popId !== popId) || Boolean(customerId && option.dataset.customerId && option.dataset.customerId !== customerId) || Boolean(form.elements.cpe_id?.value && option.dataset.cpeId && option.dataset.cpeId !== form.elements.cpe_id.value) || Boolean(ap?.value && option.dataset.accessPointId && option.dataset.accessPointId !== ap.value);
+      });
+      if (st?.selectedOptions[0]?.hidden) st.value = "";
+      const type = form.querySelector(`[name="${approach === 1 ? "access_type" : "access_type_2"}"]`);
+      form.querySelectorAll(`[data-ipam-radio-field="${approach}"]`).forEach((field) => {
+        field.hidden = type?.value !== "radio";
+        const input = field.querySelector("select");
+        if (input) {
+          input.required = type?.value === "radio";
+          if (type?.value !== "radio" && !input.disabled) input.value = "";
+        }
+      });
+      const routerRequired = Boolean(popId);
+      if (router) router.required = routerRequired;
+      form.querySelector(`[data-required-for-pop="${approach}"]`)?.toggleAttribute("hidden", !routerRequired);
+    });
+  };
+  const updateQuickLinks = () => {
+    form.querySelectorAll("[data-ipam-equipment-quick], [data-ipam-pop-quick]").forEach((link) => {
+      const url = new URL(link.href, window.location.href);
+      const resultName = link.dataset.resultName || url.searchParams.get("result_name") || "";
+      url.searchParams.set("result_name", resultName);
+      if (link.dataset.ipamPopQuick) {
+        const field = form.elements[resultName];
+        if (field?.value) url.searchParams.set(resultName, field.value);
+      } else {
+        const approach = resultName.endsWith("_2_id") ? 2 : 1;
+        const popName = approach === 1 ? "pop_id" : "pop_2_id";
+        const routerName = approach === 1 ? "router_id" : "router_2_id";
+        const params = {pop_id: form.elements[popName]?.value, secondary_pop_id: form.elements.pop_2_id?.value, customer_id: form.elements.customer_id?.value, router_id: form.elements.router_id?.value, secondary_router_id: form.elements.router_2_id?.value, cpe_id: form.elements.cpe_id?.value, access_point_id: form.elements[approach === 1 ? "access_point_id" : "access_point_2_id"]?.value};
+        Object.entries(params).forEach(([key, value]) => value ? url.searchParams.set(key, value) : url.searchParams.delete(key));
+        url.searchParams.set("equipment_type", link.dataset.equipmentType || "other");
+      }
+      link.href = url.toString();
+    });
+  };
+  const updateInheritedFields = () => {
+    const parentId = form.elements.parent_id?.value || "";
+    const context = parentContexts[parentId] || {values: {}, sources: {}};
+    const inheritedValues = targetIsPublic()
+      ? Object.fromEntries(Object.entries(context.values || {}).filter(([fieldName]) => ["company_id", "geofeed_region"].includes(fieldName)))
+      : (context.values || {});
+    inheritedFields.forEach((fieldName) => {
+      const field = form.elements[fieldName];
+      if (!field) return;
+      const wasInherited = field.dataset.ipamInherited === "1";
+      const isInherited = Object.prototype.hasOwnProperty.call(inheritedValues, fieldName);
+      const value = isInherited ? inheritedValues[fieldName] : "";
+      if (field.tagName === "SELECT") {
+        if (isInherited || wasInherited) field.value = value == null ? "" : String(value);
+      } else if (isInherited || !field.value || field.dataset.ipamInherited === "1") {
+        field.value = value == null ? "" : String(value);
+      }
+      field.disabled = isInherited;
+      field.dataset.ipamInherited = isInherited ? "1" : "0";
+      const help = form.querySelector(`[data-inherited-help="${fieldName}"]`);
+      if (help) help.textContent = isInherited ? `Herdado de ${context.sources?.[fieldName] || "bloco pai"}.` : "";
+    });
+    const locationTrigger = form.querySelector("[data-location-picker-trigger], [data-ipam-location-trigger]");
+    if (locationTrigger) locationTrigger.disabled = false;
+    updateSummary();
+  };
+  form.addEventListener("input", updateSummary);
+  form.addEventListener("change", (event) => {
+    if (event.target?.name === "parent_id" || event.target?.name === "prefix") updateInheritedFields();
+    else { filterOptions(); updateQuickLinks(); updateSummary(); }
+  });
+  form.addEventListener("ipam:coordinates-updated", updateSummary);
+  form.addEventListener("ipam:inheritance-updated", updateInheritedFields);
+  form.addEventListener("input", updateParentRequirement);
+  form.addEventListener("change", updateParentRequirement);
+  updateInheritedFields();
+  updateParentRequirement();
+  filterOptions();
+  updateQuickLinks();
+  updateSummary();
+  form.querySelector("[data-ipam-vlan-quick]")?.addEventListener("click", () => {
+    const dialog = document.createElement("dialog");
+    dialog.className = "quick-entry-dialog ipam-vlan-dialog";
+    dialog.innerHTML = `<div class="quick-entry-dialog-inner"><header class="quick-entry-dialog-header"><div><p class="eyebrow">Cadastro rápido</p><h2>Registrar VLAN</h2></div><button class="dialog-close" type="button" aria-label="Fechar">×</button></header><div class="form-grid"><label><span>Identificação da VLAN *</span><input data-vlan-value required inputmode="numeric" placeholder="Ex.: 120"></label><label class="full"><span>Descrição</span><input data-vlan-description placeholder="Ex.: Clientes corporativos Curitiba"></label></div><div class="form-actions"><button class="button button-secondary" type="button" data-vlan-cancel>Cancelar</button><button class="button button-primary" type="button" data-vlan-apply>Adicionar VLAN</button></div></div>`;
+    document.body.append(dialog);
+    const close = () => dialog.close();
+    dialog.querySelector(".dialog-close").addEventListener("click", close);
+    dialog.querySelector("[data-vlan-cancel]").addEventListener("click", close);
+    dialog.querySelector("[data-vlan-apply]").addEventListener("click", () => {
+      const value = dialog.querySelector("[data-vlan-value]").value.trim();
+      if (!value) { dialog.querySelector("[data-vlan-value]").classList.add("is-required-missing"); return; }
+      const description = dialog.querySelector("[data-vlan-description]").value.trim();
+      const input = form.elements.vlan;
+      if (input) { input.value = description ? `${value} · ${description}` : value; input.dispatchEvent(new Event("input", {bubbles: true})); }
+      close();
+    });
+    dialog.addEventListener("close", () => dialog.remove(), {once: true});
+    dialog.showModal();
+  });
+};
+
+document.querySelectorAll("form[data-ipam-allocation-form]").forEach((form) => window.initIpamAllocationForm(form));
+document.querySelectorAll("form[data-equipment-form]").forEach((form) => window.initIpamEquipmentForm(form));
+
+(() => {
+  const isFormRoute = (href) => /\/(?:new|edit)(?:[/?#]|$)/.test(new URL(href, window.location.href).pathname);
+  const extractForm = (html, url) => {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    const form = parsed.querySelector("main form.form-card, main form[data-quick-form], main form");
+    if (!form) return null;
+    if (!form.getAttribute("action")) form.setAttribute("action", url);
+    const flashes = parsed.querySelector(".flash-stack");
+    return {form, flashes};
+  };
+  const attachForm = (dialog, form) => {
+    const body = dialog.querySelector("[data-quick-dialog-body]");
+    body.replaceChildren(form);
+    form.classList.add("quick-entry-form");
+    window.applyFieldExamples?.(body);
+    window.initIpamAllocationForm?.(form);
+    window.initIpamEquipmentForm?.(form);
+    form.querySelectorAll("[data-service-picker]").forEach((picker) => window.initQuickServicePicker?.(picker));
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const submit = form.querySelector("button[type=submit]");
+      if (submit) { submit.disabled = true; submit.dataset.previousLabel = submit.textContent; submit.textContent = "Salvando…"; }
+      const response = await fetch(form.action || window.location.href, {method: form.method || "POST", body: new FormData(form), credentials: "same-origin", headers: {"X-Requested-With": "XMLHttpRequest", Accept: "text/html"}});
+      if (response.redirected || !isFormRoute(response.url)) {
+        const resultName = form.dataset.quickResultName;
+        const resultUrl = new URL(response.url, window.location.href);
+        const resultId = resultUrl.searchParams.get("equipment_created") || resultUrl.searchParams.get("pop_created");
+        if (resultName && resultId) {
+          const isPop = resultUrl.searchParams.has("pop_created");
+          const resultLabel = resultUrl.searchParams.get(isPop ? "pop_name" : "equipment_name") || `${isPop ? "POP/DC" : "Equipamento"} ${resultId}`;
+          document.querySelectorAll(`[name="${CSS.escape(resultName)}"]`).forEach((select) => {
+            if (![...select.options].some((option) => option.value === resultId)) select.add(new Option(resultLabel, resultId));
+            select.value = resultId;
+            select.dispatchEvent(new Event("change", {bubbles: true}));
+          });
+          dialog.close();
+          return;
+        }
+        dialog.close(); window.location.reload(); return;
+      }
+      const extracted = extractForm(await response.text(), response.url);
+      if (extracted) {
+        const flash = extracted.flashes;
+        attachForm(dialog, extracted.form);
+        if (flash) {
+          flash.classList.add("quick-entry-errors");
+          body.append(flash);
+          window.highlightMissingRequired?.(body);
+        }
+      }
+    });
+    form.querySelectorAll("input, textarea").forEach((field) => { if (!field.placeholder && field.name) field.dispatchEvent(new Event("input")); });
+    form.querySelectorAll("[data-service-picker]").forEach((picker) => window.initQuickServicePicker?.(picker));
+  };
+  const openQuickLink = async (link, event) => {
+    if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    const response = await fetch(link.href, {credentials: "same-origin", headers: {"X-Requested-With": "XMLHttpRequest", Accept: "text/html"}});
+    const extracted = extractForm(await response.text(), link.href);
+    if (!extracted) { window.location.assign(link.href); return; }
+    const quickResultName = new URL(link.href, window.location.href).searchParams.get("result_name");
+    if (quickResultName) extracted.form.dataset.quickResultName = quickResultName;
+    const dialog = document.createElement("dialog");
+    dialog.className = "quick-entry-dialog";
+    dialog.innerHTML = `<div class="quick-entry-dialog-inner"><header class="quick-entry-dialog-header"><div><p class="eyebrow">Cadastro rápido</p><h2>${link.textContent.trim() || "Editar registro"}</h2></div><button class="dialog-close" type="button" aria-label="Fechar">×</button></header><div data-quick-dialog-body></div></div>`;
+    document.body.append(dialog);
+    dialog.querySelector(".dialog-close").addEventListener("click", () => dialog.close());
+    dialog.addEventListener("close", () => dialog.remove());
+    attachForm(dialog, extracted.form);
+    dialog.showModal();
+  };
+  document.querySelectorAll("a[data-quick-create], main a[href]").forEach((link) => {
+    if (!link.matches("[data-quick-create]") && !isFormRoute(link.href)) return;
+    link.dataset.quickCreateBound = "1";
+    link.addEventListener("click", (event) => openQuickLink(link, event));
+  });
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[data-quick-create]");
+    if (link && !link.dataset.quickCreateBound) openQuickLink(link, event);
+  });
+})();
+
+(() => {
+  let dialog;
+  let map;
+  let marker;
+  let form;
+  let addressField;
+  let latitudeField;
+  let longitudeField;
+  let searchField;
+  let status;
+  const brazilCenter = [-15.78, -47.93];
+  const readCoordinate = (field) => {
+    const value = Number.parseFloat(String(field?.value || "").replace(",", "."));
+    return Number.isFinite(value) ? value : null;
+  };
+  const updateCoordinates = (lat, lng) => {
+    if (!latitudeField || !longitudeField) return;
+    latitudeField.value = Number(lat).toFixed(7).replace(/0+$/, "").replace(/\.$/, "");
+    longitudeField.value = Number(lng).toFixed(7).replace(/0+$/, "").replace(/\.$/, "");
+    latitudeField.dispatchEvent(new Event("input", {bubbles: true}));
+    longitudeField.dispatchEvent(new Event("input", {bubbles: true}));
+    form?.dispatchEvent(new Event("ipam:coordinates-updated"));
+    if (status) status.textContent = `Marcador em ${latitudeField.value}, ${longitudeField.value}.`;
+  };
+  const placeMarker = (lat, lng, center = true) => {
+    if (!map) return;
+    const point = [lat, lng];
+    if (!marker) {
+      marker = L.marker(point, {draggable: true, icon: L.divIcon({className: "ipam-map-pin-wrap", html: '<span class="ipam-map-pin" aria-hidden="true"></span>', iconSize: [24, 32], iconAnchor: [12, 31]})}).addTo(map);
+      marker.on("dragend", () => { const position = marker.getLatLng(); updateCoordinates(position.lat, position.lng); });
+    } else marker.setLatLng(point);
+    if (center) map.setView(point, Math.max(map.getZoom(), 14));
+    updateCoordinates(lat, lng);
+  };
+  const close = () => {
+    if (!dialog) return;
+    if (map) map.remove();
+    map = null; marker = null; dialog.remove(); dialog = null; form = null;
+    addressField = null; latitudeField = null; longitudeField = null; searchField = null; status = null;
+  };
+  document.addEventListener("click", (event) => {
+    const trigger = event.target.closest("[data-location-picker-trigger], [data-ipam-location-trigger]");
+    if (!trigger) return;
+    event.preventDefault();
+    form = trigger.closest("form");
+    const field = (name, fallback) => form?.elements?.namedItem(name || fallback) || null;
+    addressField = field(trigger.dataset.locationAddressField, "allocation_address");
+    latitudeField = field(trigger.dataset.locationLatitudeField, "latitude");
+    longitudeField = field(trigger.dataset.locationLongitudeField, "longitude");
+    const title = trigger.dataset.locationTitle || "Definir endereço exato";
+    dialog = document.createElement("dialog");
+    dialog.className = "ipam-location-dialog";
+    dialog.innerHTML = `<div class="ipam-location-dialog-inner"><header class="quick-entry-dialog-header"><div><p class="eyebrow">Localização operacional</p><h2>${title}</h2><p class="muted">Pesquise o endereço e ajuste o marcador no mapa.</p></div><button class="dialog-close" type="button" aria-label="Fechar">×</button></header><div class="ipam-location-tools"><label><span>Endereço para localizar</span><div class="field-with-action"><input data-ipam-location-search type="search" placeholder="Ex.: Av. Paulista, 1000, São Paulo/SP"><button class="button button-secondary" type="button" data-ipam-location-search-button>Localizar</button></div></label><p class="muted" data-ipam-location-status>Você também pode clicar no mapa ou arrastar o marcador.</p></div><div class="ipam-location-map" data-ipam-location-map></div><footer class="ipam-location-footer"><span class="muted" data-ipam-location-coordinates>Coordenadas ainda não definidas.</span><div><button class="button button-secondary" type="button" data-ipam-location-cancel>Cancelar</button><button class="button button-primary" type="button" data-ipam-location-apply>Aplicar localização</button></div></footer></div>`;
+    document.body.append(dialog);
+    searchField = dialog.querySelector("[data-ipam-location-search]");
+    status = dialog.querySelector("[data-ipam-location-status]");
+    const coordinates = dialog.querySelector("[data-ipam-location-coordinates]");
+    if (addressField?.value) searchField.value = addressField.value;
+    const syncCoordinatesLabel = () => { if (coordinates) coordinates.textContent = latitudeField?.value && longitudeField?.value ? `Coordenadas: ${latitudeField.value}, ${longitudeField.value}` : "Coordenadas ainda não definidas."; };
+    dialog.querySelector("[data-ipam-location-search-button]").addEventListener("click", async () => {
+      const query = searchField.value.trim();
+      if (!query) { status.textContent = "Digite um endereço para localizar."; return; }
+      status.textContent = "Localizando endereço…";
+      try {
+        const url = new URL("/geocode", window.location.origin);
+        url.searchParams.set("q", query);
+        const response = await fetch(url, {credentials: "same-origin", headers: {Accept: "application/json"}});
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "O serviço de localização está indisponível no momento.");
+        const results = Array.isArray(payload.results) ? payload.results : [];
+        if (!results.length) throw new Error("Endereço não encontrado.");
+        placeMarker(Number(results[0].lat), Number(results[0].lon));
+        status.textContent = results[0].display_name || "Endereço localizado.";
+        syncCoordinatesLabel();
+      } catch (error) { status.textContent = error.message || "Não foi possível localizar o endereço. Ajuste o marcador manualmente."; }
+    });
+    searchField.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      dialog.querySelector("[data-ipam-location-search-button]").click();
+    });
+    dialog.querySelector("[data-ipam-location-map]");
+    dialog.querySelector("[data-ipam-location-cancel]").addEventListener("click", close);
+    dialog.querySelector(".dialog-close").addEventListener("click", close);
+    dialog.querySelector("[data-ipam-location-apply]").addEventListener("click", () => {
+      if (addressField && searchField.value.trim()) addressField.value = searchField.value.trim();
+      addressField?.dispatchEvent(new Event("input", {bubbles: true}));
+      close();
+    });
+    dialog.addEventListener("cancel", (event) => { event.preventDefault(); close(); });
+    dialog.addEventListener("close", close);
+    dialog.showModal();
+    map = L.map(dialog.querySelector("[data-ipam-location-map]"), {scrollWheelZoom: true, zoomControl: true}).setView(brazilCenter, 4);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: '&copy; OpenStreetMap'}).addTo(map);
+    map.on("click", (mapEvent) => { placeMarker(mapEvent.latlng.lat, mapEvent.latlng.lng, false); syncCoordinatesLabel(); });
+    const existingLat = readCoordinate(latitudeField);
+    const existingLng = readCoordinate(longitudeField);
+    if (existingLat !== null && existingLng !== null) placeMarker(existingLat, existingLng);
+    setTimeout(() => map?.invalidateSize(), 50);
+  });
+})();
+document.querySelectorAll("[data-dashboard-datetime]").forEach((element) => {
+  const date = new Date(element.dataset.dashboardDatetime);
+  if (!Number.isNaN(date.getTime())) {
+    element.textContent = new Intl.DateTimeFormat("pt-BR", { dateStyle: "short", timeStyle: "short" }).format(date);
+  }
+});
+
+(() => {
+  const dashboard = document.querySelector("[data-dashboard-operations]");
+  if (!dashboard) return;
+  const onlineCount = document.querySelector("[data-dashboard-online-count]");
+  const runningCount = document.querySelector("[data-dashboard-running-scan-count]");
+  const recentList = document.querySelector("[data-dashboard-recent-list]");
+  const emptyState = document.querySelector("[data-dashboard-recent-empty]");
+  const dateFormatter = new Intl.DateTimeFormat("pt-BR", {dateStyle: "short", timeStyle: "short"});
+  const formatDate = (value) => {
+    const date = new Date(value || "");
+    return Number.isNaN(date.getTime()) ? String(value || "") : dateFormatter.format(date);
+  };
+  const badgeClass = (slug) => slug === "listed" || slug === "failed" ? "badge badge-error" : slug === "clean" ? "badge badge-ok" : "badge badge-warning";
+  const renderRecent = (scans) => {
+    if (!recentList) return;
+    recentList.replaceChildren();
+    const items = Array.isArray(scans) ? scans : [];
+    recentList.hidden = items.length === 0;
+    if (emptyState) emptyState.hidden = items.length > 0;
+    items.forEach((scan) => {
+      const item = document.createElement("li");
+      item.className = "scanned-item";
+      const link = document.createElement("a");
+      link.className = "scanned-item-link";
+      link.href = scan.scan_url || "#";
+      const details = document.createElement("div");
+      const target = document.createElement("strong");
+      target.textContent = scan.target || "Alvo não informado";
+      const actor = document.createElement("small");
+      actor.textContent = `${scan.requester_name || "Usuário"} · ${scan.requester_email || ""}`;
+      const reference = document.createElement("small");
+      reference.textContent = `${scan.reference || ""} · ${formatDate(scan.created_at)}`;
+      details.append(target, actor, reference);
+      const badge = document.createElement("span");
+      badge.className = badgeClass(scan.result_slug);
+      badge.textContent = scan.result_label || "Sem resultado";
+      link.append(details, badge);
+      item.append(link);
+      recentList.append(item);
+    });
+  };
+  const refreshDashboardOperations = async () => {
+    try {
+      const response = await fetch(dashboard.dataset.dashboardOperationsUrl, {credentials: "same-origin", cache: "no-store", headers: {Accept: "application/json"}});
+      if (!response.ok) return;
+      const payload = await response.json();
+      if (onlineCount) onlineCount.textContent = String(payload.online_user_count ?? 0);
+      if (runningCount) runningCount.textContent = String(payload.running_scan_count ?? 0);
+      renderRecent(payload.recent_health_scans);
+    } catch (_) {
+      // The server-rendered values remain visible if a background refresh fails.
+    }
+  };
+  refreshDashboardOperations();
+  window.setInterval(refreshDashboardOperations, 10000);
 })();

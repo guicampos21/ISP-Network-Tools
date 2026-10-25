@@ -1,0 +1,27 @@
+{% if report_stats.scanned_ips %}
+<section class="report-area report-panorama" aria-label="Panorama visual">
+  <div class="report-section-heading"><div><h3>Panorama visual</h3><p class="muted">Distribuição dos resultados e fontes com detecção.</p></div></div>
+  <div class="report-charts">
+  <article class="chart-card">
+    <h4>Situação dos endereços IP</h4>
+    <div class="chart-distribution">
+      <svg class="chart-donut" viewBox="0 0 120 120" role="img" aria-label="{{ report_stats.listed_ips }} IPs com detecção, {{ report_stats.clean_ips }} limpos e {{ report_stats.incomplete_ips }} inconclusivos">
+        <circle cx="60" cy="60" r="46" fill="none" stroke="#302340" stroke-width="15"/>
+        {% for item in report_charts.distribution %}{% if item.count %}<circle cx="60" cy="60" r="46" fill="none" stroke="{{ item.color }}" stroke-width="15" pathLength="100" stroke-dasharray="{{ item.percent }} {{ 100 - item.percent }}" stroke-dashoffset="{{ item.offset }}" transform="rotate(-90 60 60)"/>{% endif %}{% endfor %}
+        <text x="60" y="58" text-anchor="middle" class="chart-total">{{ report_stats.scanned_ips }}</text><text x="60" y="75" text-anchor="middle" class="chart-caption">IPs analisados</text>
+      </svg>
+      <ul class="chart-legend">{% for item in report_charts.distribution %}<li><span class="chart-dot chart-dot-{{ item.tone }}" aria-hidden="true"></span><span>{{ item.label }}</span><strong>{{ item.count }}</strong><small>{{ item.percent }}%</small></li>{% endfor %}</ul>
+    </div>
+  </article>
+  <article class="chart-card">
+    <h4>{{ report_stats.chart_scope_heading }}</h4><p class="muted">Detecções e consultas inconclusivas aparecem primeiro.</p>
+    <div class="chart-block-list">{% for block in report_charts.blocks %}<div class="chart-block"><div><strong>{{ block.block }}</strong><small>{{ block.ip_count }} {{ 'IP' if block.ip_count == 1 else 'IPs' }}</small></div><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="{{ block.block }}: {% for segment in block.segments %}{{ segment.count }} {{ segment.label }}{% if not loop.last %}, {% endif %}{% endfor %}">{% for segment in block.segments %}{% if segment.width %}<rect x="{{ segment.x }}" y="0" width="{{ segment.width }}" height="8" fill="{{ segment.color }}"/>{% endif %}{% endfor %}</svg></div>{% else %}<p class="chart-empty">O detalhamento por bloco foi omitido neste relatório consolidado.</p>{% endfor %}</div>
+    {% if report_charts.total_blocks > 12 %}<p class="muted">Exibindo 12 de {{ report_charts.total_blocks }} alvos. O detalhamento completo está abaixo.</p>{% endif %}
+  </article>
+  <article class="chart-card">
+    <h4>Blacklists com detecções</h4>
+    {% if report_charts.top_hits %}<div class="chart-hit-list">{% for hit in report_charts.top_hits %}<div class="chart-block"><div><strong>{{ hit.name }}</strong><small>{{ hit.count }} alvos</small></div><svg viewBox="0 0 100 8" preserveAspectRatio="none" role="img" aria-label="{{ hit.name }}: {{ hit.count }} alvos detectados"><rect x="0" y="0" width="100" height="8" fill="#302340"/><rect x="0" y="0" width="{{ hit.percent }}" height="8" fill="#e56b79"/></svg></div>{% endfor %}</div>{% else %}<p class="chart-empty">{{ 'As consultas são inconclusivas. Não é possível afirmar que os alvos estão limpos.' if report_stats.incomplete_ips else 'Nenhuma detecção nas consultas concluídas.' }}</p>{% endif %}
+  </article>
+  </div>
+</section>
+{% endif %}

@@ -1,0 +1,12 @@
+<div class="result-table-wrap">
+  <table class="result-table">
+    <thead><tr><th>Endereço IP</th><th>Blacklists com detecção</th><th>Resultado</th></tr></thead>
+    <tbody>{% for row in rows %}
+      <tr>
+        <td><code>{{ row.ip }}</code></td>
+        <td>{% if row.has_detection %}<div class="blacklist-cell"><button class="blacklist-status-button blacklist-status-listed" type="button" aria-describedby="listed-ip-{{ loop.index }}">Listado ({{ row.detected_names|length }})</button><div class="blacklist-tooltip" id="listed-ip-{{ loop.index }}" role="tooltip"><strong>Blacklists com detecção</strong><div class="blacklist-tooltip-list">{% for name in row.detected_names %}<span class="blacklist-chip blacklist-chip-listed">{{ name }}</span>{% endfor %}</div></div></div>{% else %}<span class="blacklist-status-button blacklist-status-clean">Sem listagem</span>{% endif %}</td>
+        <td><span class="result-status result-status-{{ 'listed' if row.has_detection else 'clean' }}">{{ 'Detectado' if row.has_detection else 'Sem detecção' }}</span></td>
+      </tr>
+    {% endfor %}</tbody>
+  </table>
+</div>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Novo equipamento · IPAM{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">IPAM/Geofeed</p><h1>Novo equipamento</h1><p class="muted">Cadastre o equipamento e informe os vínculos operacionais compatíveis com seu tipo.</p></div></div>
+<form class="card form-card" method="post" data-equipment-form data-quick-result-name="{{ result_name }}">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+  <div class="form-grid">
+    <label><span>Tipo *</span><select name="equipment_type" required data-equipment-type><option value="router" {% if equipment_type == 'router' %}selected{% endif %}>Roteador POP</option><option value="switch" {% if equipment_type == 'switch' %}selected{% endif %}>Switch POP</option><option value="edge_router" {% if equipment_type == 'edge_router' %}selected{% endif %}>Roteador de borda</option><option value="cpe" {% if equipment_type == 'cpe' %}selected{% endif %}>CPE</option><option value="radio_ap" {% if equipment_type == 'radio_ap' %}selected{% endif %}>Rádio AP (access-point)</option><option value="radio_st" {% if equipment_type == 'radio_st' %}selected{% endif %}>Rádio cliente (ST)</option></select></label>
+    <label><span>Nome *</span><input name="name" required maxlength="160" placeholder="Ex.: Roteador POP Curitiba"></label>
+    <label><span>Código *</span><input name="code" required maxlength="80" placeholder="Ex.: RTR-CWB-01"></label>
+    <label data-equipment-pop-field><span>POP/DC <b>*</b></span><select name="pop_id" data-equipment-pop><option value="">Selecione o POP/DC</option>{% for pop in pops %}<option value="{{ pop.id }}" {% if (request.form.get('pop_id') or request.args.get('pop_id'))|string == pop.id|string %}selected{% endif %}>{{ pop.code }} · {{ pop.name }}</option>{% endfor %}</select></label>
+    <label data-equipment-secondary-pop-field><span>Segundo POP/DC</span><select name="secondary_pop_id"><option value="">Sem segunda abordagem</option>{% for pop in pops %}<option value="{{ pop.id }}" {% if (request.form.get('secondary_pop_id') or request.args.get('secondary_pop_id'))|string == pop.id|string %}selected{% endif %}>{{ pop.code }} · {{ pop.name }}</option>{% endfor %}</select></label>
+    <label data-equipment-customer-field><span>Cliente <b>*</b></span><select name="customer_id" data-equipment-customer><option value="">Selecione o cliente</option>{% for customer in customers %}<option value="{{ customer.id }}" {% if (request.form.get('customer_id') or request.args.get('customer_id'))|string == customer.id|string %}selected{% endif %}>{{ customer.name }}</option>{% endfor %}</select></label>
+    <label data-equipment-router-field><span>Roteador POP da primeira abordagem</span><select name="router_id"><option value="">Sem roteador</option>{% for router in routers %}<option value="{{ router.id }}" data-pop-id="{{ router.pop_id or '' }}" {% if (request.form.get('router_id') or request.args.get('router_id'))|string == router.id|string %}selected{% endif %}>{{ router.name }} · {{ router.code }}</option>{% endfor %}</select></label>
+    <label data-equipment-secondary-router-field><span>Roteador POP da segunda abordagem</span><select name="secondary_router_id"><option value="">Sem roteador</option>{% for router in routers %}<option value="{{ router.id }}" data-pop-id="{{ router.pop_id or '' }}" {% if (request.form.get('secondary_router_id') or request.args.get('secondary_router_id'))|string == router.id|string %}selected{% endif %}>{{ router.name }} · {{ router.code }}</option>{% endfor %}</select></label>
+    <label data-equipment-cpe-field><span>CPE do cliente <b>*</b></span><select name="cpe_id"><option value="">Selecione a CPE</option>{% for cpe in cpes %}<option value="{{ cpe.id }}" data-customer-id="{{ cpe.customer_id or '' }}">{{ cpe.name }} · {{ cpe.code }}</option>{% endfor %}</select></label>
+    <label data-equipment-ap-field><span>Rádio AP do POP <b>*</b></span><select name="access_point_id"><option value="">Selecione o rádio AP</option>{% for access_point in access_points %}<option value="{{ access_point.id }}" data-pop-id="{{ access_point.pop_id or '' }}" data-customer-id="{{ access_point.customer_id or '' }}">{{ access_point.name }} · {{ access_point.code }}</option>{% endfor %}</select></label>
+    <label><span>Fabricante</span><input name="vendor" maxlength="120" placeholder="Ex.: Cisco"></label>
+    <label><span>Modelo</span><input name="model" maxlength="120" placeholder="Ex.: ASR 1001-X"></label>
+    <label><span>Número de série</span><input name="serial_number" maxlength="120" placeholder="Ex.: FOC12345678"></label>
+    <label><span>Localização</span><input name="location" maxlength="255" placeholder="Ex.: POP Curitiba · Rack 04 · U12"></label>
+    <label class="full"><span>Observações</span><textarea name="notes" rows="3" maxlength="4000" placeholder="Ex.: Equipamento reservado para a segunda abordagem"></textarea></label>
+  </div>
+  <div class="form-actions"><a class="button button-secondary" href="{{ url_for('panel.ipam') }}">Cancelar</a><button class="button button-primary" type="submit">Cadastrar equipamento</button></div>
+</form>
+{% endblock %}

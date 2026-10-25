@@ -26,7 +26,9 @@ class Config:
     PUBLIC_CONTACT_EMAIL = os.getenv("PUBLIC_CONTACT_EMAIL", "").strip()[:254]
     ADMIN_BASE_URL = os.getenv("ADMIN_BASE_URL", "http://admin-center.localhost").rstrip("/")
     PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "http://geofeed.localhost").rstrip("/")
-    HEALTH_BASE_URL = os.getenv("HEALTH_BASE_URL", "http://network-health.localhost").rstrip("/")
+    HEALTH_BASE_URL = os.getenv(
+        "HEALTH_BASE_URL", "http://admin-center.localhost/network-health"
+    ).rstrip("/")
     HEALTH_INTERNAL_BASE_URL = os.getenv(
         "HEALTH_INTERNAL_BASE_URL", "http://isp-network-health:8090"
     ).rstrip("/")

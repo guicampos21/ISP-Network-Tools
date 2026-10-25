@@ -1,5 +1,3 @@
-name: ${COMPOSE_PROJECT_NAME:-isp-network-tools}
-
 services:
   postgres:
     image: ${POSTGRES_IMAGE:-postgres:16.4-alpine}
@@ -66,8 +64,9 @@ services:
       DATABASE_PASSWORD_FILE: /run/secrets/core_db_password
       REDIS_URL: redis://redis:6379/0
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      ADMIN_INTERNAL_BASE_URL: ${ADMIN_INTERNAL_BASE_URL:-http://admin-center:8080}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
-      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://admin-center.localhost/network-health}
       HEALTH_INTERNAL_BASE_URL: ${HEALTH_INTERNAL_BASE_URL:-http://isp-network-health:8090}
       TRUSTED_HOSTS: ${TRUSTED_HOSTS:-admin-center.localhost,localhost,127.0.0.1}
       LOCAL_AUTH_ENABLED: ${LOCAL_AUTH_ENABLED:-true}
@@ -123,6 +122,7 @@ services:
     command: ["flask", "--app", "wsgi:app", "run-worker"]
     environment:
       APP_ENV: ${APP_ENV:-development}
+      SSO_SIGNING_SECRET_FILE: /run/secrets/sso_signing_secret
       SECRET_KEY_FILE: /run/secrets/app_secret_key
       SETUP_TOKEN_FILE: /run/secrets/setup_token
       DATABASE_HOST: postgres
@@ -133,7 +133,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
-      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://admin-center.localhost/network-health}
       TRUSTED_HOSTS: ${TRUSTED_HOSTS:-admin-center.localhost,localhost,127.0.0.1}
       PUBLIC_ROOT: /publish
       BACKUP_ROOT: /backups
@@ -143,6 +143,7 @@ services:
       PUBLIC_CONTACT_EMAIL: ${PUBLIC_CONTACT_EMAIL:-noc@example.invalid}
     secrets:
       - app_secret_key
+      - sso_signing_secret
       - setup_token
       - core_db_password
     volumes:
@@ -169,9 +170,10 @@ services:
       SUITE_NAME: ${SUITE_NAME:-ISP Network Tools}
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
-      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://admin-center.localhost/network-health}
       PUBLIC_CONTACT_EMAIL: ${PUBLIC_CONTACT_EMAIL:-noc@example.invalid}
     volumes:
+      - geofeed_public_html:/usr/share/nginx/html
       - geofeed_publish:/usr/share/nginx/blocos:ro
     networks:
       - proxy
@@ -201,11 +203,13 @@ services:
       REDIS_URL: redis://redis:6379/1
       INH_MAX_CIDR_IPS: ${INH_MAX_CIDR_IPS:-0}
       HEALTH_WORKER_MAX_WORKERS: ${HEALTH_WORKER_MAX_WORKERS:-32}
+      HEALTH_DNS_SERVER: ${HEALTH_DNS_SERVER:-}
       ADMIN_BASE_URL: ${ADMIN_BASE_URL:-http://admin-center.localhost}
+      ADMIN_INTERNAL_BASE_URL: ${ADMIN_INTERNAL_BASE_URL:-http://admin-center:8080}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://geofeed.localhost}
-      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://network-health.localhost}
+      HEALTH_BASE_URL: ${HEALTH_BASE_URL:-http://admin-center.localhost/network-health}
       SUITE_NAME: ${SUITE_NAME:-ISP Network Tools}
-      TRUSTED_HOSTS: ${HEALTH_TRUSTED_HOSTS:-network-health.localhost,isp-network-health,localhost,127.0.0.1}
+      TRUSTED_HOSTS: ${HEALTH_TRUSTED_HOSTS:-admin-center.localhost,isp-network-health,network-health.localhost,localhost,127.0.0.1}
       DEV_AUTH: ${DEV_AUTH:-false}
     secrets:
       - health_secret_key
@@ -254,6 +258,7 @@ services:
         condition: service_healthy
     networks:
       - backend
+      - collector-egress
     security_opt:
       - no-new-privileges:true
 
@@ -263,10 +268,18 @@ volumes:
   admin_data:
   admin_backups:
   geofeed_publish:
+  geofeed_public_html:
 
 networks:
   backend:
     internal: true
+  collector-egress:
+    # Collectors need outbound DNS/HTTPS. Databases remain on backend only;
+    # this network publishes no ports and grants no access to the proxy.
+    internal: false
+    ipam:
+      config:
+        - subnet: ${COLLECTOR_EGRESS_SUBNET:-172.22.0.0/16}
   proxy:
     external: true
     name: ${PROXY_NETWORK:-npm_default}

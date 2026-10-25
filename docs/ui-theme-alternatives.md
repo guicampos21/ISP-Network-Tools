@@ -1,6 +1,6 @@
 # Alternativas visuais da suíte
 
-O tema aplicado nesta entrega é **Obsidian + Signal**. Ele mantém a identidade roxa atual do Geofeed Admin Center, mas separa melhor o fundo, os cartões, os cabeçalhos de tabela e os contornos. A mesma hierarquia visual foi aplicada ao Admin Center, ao Geofeed público e ao ISP Network Health.
+O tema aplicado nesta entrega é **Obsidian + Signal**. Ele preserva a identidade roxa adotada no portal administrativo original, mas separa melhor o fundo, os cartões, os cabeçalhos de tabela e os contornos. A mesma hierarquia visual foi aplicada ao Admin Center, ao Geofeed público e ao ISP Network Health.
 
 ## Tema aplicado: Obsidian + Signal
 

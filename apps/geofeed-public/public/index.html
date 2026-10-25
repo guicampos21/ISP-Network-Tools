@@ -21,7 +21,11 @@
         }
         * { box-sizing: border-box; }
         html { min-height: 100%; background: var(--background); }
+        .skip-link { position: fixed; z-index: 100; top: .5em; left: .5em; padding: .6em .8em; border-radius: .35em; color: #fff; background: var(--brand); transform: translateY(-160%); }
+        .skip-link:focus { transform: translateY(0); }
         body {
+            display: flex;
+            flex-direction: column;
             min-height: 100vh;
             margin: 0;
             color: var(--text);
@@ -38,11 +42,12 @@
             background: linear-gradient(90deg, var(--brand), #7c32c7 65%, var(--brand-light));
         }
         main {
-            width: min(76em, calc(100% - 2em));
+            flex: 1 0 auto;
+            width: calc(100% - clamp(4em, 8vw, 10em));
             margin: 0 auto;
             padding: 1.25em 0 3em;
         }
-        .site-header { display: flex; align-items: center; gap: 1em; min-height: 4.6em; margin-bottom: 2.5em; padding: .7em 0; border-bottom: 1px solid var(--border); }
+        .site-header { position: sticky; top: 0; z-index: 15; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 1em; width: 100vw; min-height: 4.6em; margin: 0 0 2.5em calc((min(76em,calc(100vw - 2em)) - 100vw) / 2); padding: .7em max(1em,calc((100vw - 76em) / 2)); border-bottom: 1px solid var(--border); background: #0b0910ec; backdrop-filter: blur(16px); }
         .brand { display: inline-flex; align-items: center; gap: .7em; color: var(--text); text-decoration: none; }
         .brand-mark { display: grid; place-items: center; width: 2.35em; height: 2.35em; border-radius: .6em; color: #fff; background: linear-gradient(145deg,#9554d8,#4d218f); font-weight: bold; }
         .brand strong,.brand small { display: block; line-height: 1.15; }
@@ -66,14 +71,17 @@
         .launcher-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: .25em; }
         .launcher-item { display: flex; min-height: 6em; flex-direction: column; align-items: center; gap: .48em; padding: .7em .35em .55em; border: 1px solid transparent; border-radius: .4em; color: var(--text); text-align: center; text-decoration: none; }
         .launcher-item:hover,.launcher-item:focus-visible { border-color: var(--border-strong); background: var(--border); }
-        .launcher-item-copy { display: block; width: 100%; overflow: hidden; }
-        .launcher-item strong { display: block; overflow: hidden; font-size: .76em; text-overflow: ellipsis; white-space: nowrap; }
+        .launcher-item-copy { display: block; width: 100%; overflow: visible; }
+        .launcher-item strong { display: block; overflow-wrap: anywhere; font-size: .76em; line-height: 1.25; white-space: normal; text-wrap: balance; }
         .launcher-empty { grid-column: 1/-1; margin: 1em .3em .5em; color: var(--muted); font-size: .8em; text-align: center; }
         .app-icon { display: grid; place-items: center; width: 2.8em; height: 2.8em; border: 1px solid #ffffff33; border-radius: .8em; color: #fff; box-shadow: 0 .35em .8em #0000003d; }
         .app-icon svg { width: 1.8em; height: 1.8em; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 2.2; }
         .app-icon-geofeed { background: linear-gradient(145deg,#2b8eb1,#15517e); }
         .app-icon-admin { background: linear-gradient(145deg,#9554d8,#4d218f); }
         .app-icon-health { background: linear-gradient(145deg,#1ea77e,#12625d); }
+        .app-icon-ipam { background: linear-gradient(145deg,#dc8b43,#8e3b2f); }
+        .header-action { justify-self: end; padding: .55em .8em; border: 1px solid var(--border); border-radius: .45em; color: var(--text); background: var(--surface-light); font-size: .82em; font-weight: bold; text-decoration: none; }
+        .header-action:hover { border-color: var(--brand-light); background: rgba(86,25,163,.28); }
         .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
         .hero { max-width: 52em; margin-bottom: 2.2em; }
         .eyebrow {
@@ -140,7 +148,12 @@
             background: var(--surface-light);
         }
         .table-wrap {
-            overflow-x: auto;
+            width: 100%;
+            max-width: 100%;
+            max-height: min(68vh, 44em);
+            overflow: auto;
+            overscroll-behavior: contain;
+            scrollbar-gutter: stable;
             border: 1px solid var(--border);
             border-radius: 0.75em;
             background: var(--surface);
@@ -210,9 +223,13 @@
         .contacts h2 { margin: 0 0 0.45em; font-size: 1em; }
         .contacts p { margin: 0.3em 0; color: var(--muted); }
         .note { margin-top: 1.5em; color: #a99bb4; font-size: 0.85em; }
+        .suite-footer { display: flex; min-height: 2.75em; align-items: center; justify-content: center; gap: .5em; margin-top: 1.5em; padding: .65em 1em; border-top: 1px solid var(--border); color: var(--muted); background: rgba(8,6,12,.94); font-size: .72em; letter-spacing: .02em; }
+        .suite-footer a { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }
+        .suite-footer a:hover,.suite-footer a:focus-visible { color: var(--text); }
+        .suite-footer svg { width: 1.15em; height: 1.15em; fill: currentColor; stroke: none; }
         .launcher-item[hidden] { display: none; }
         @media (max-width: 700px) {
-            main { padding-top: 1.5em; }
+            main { width: calc(100% - 1.25em); padding-top: 1.5em; }
             .launcher-panel { max-height: calc(100vh - 7em); overflow-y: auto; }
             .download-toolbar { align-items: stretch; flex-direction: column; }
             .bulk-button { align-self: flex-start; }
@@ -222,23 +239,8 @@
     </style>
 </head>
 <body>
-<main>
-    <header class="site-header">
-        <details class="app-launcher" data-app-launcher>
-            <summary class="launcher-trigger" data-launcher-trigger aria-label="Abrir aplicações" aria-controls="suite-launcher-panel" aria-expanded="false" title="Aplicações"><span class="launcher-grid-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span></summary>
-            <div class="launcher-panel" id="suite-launcher-panel" role="dialog" aria-label="Aplicações da suíte">
-                <div class="launcher-heading"><div><span class="launcher-overline">${SUITE_NAME}</span><strong>Aplicações</strong></div><button class="launcher-close" type="button" data-launcher-close aria-label="Fechar aplicações">×</button></div>
-                <label class="launcher-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><span class="sr-only">Pesquisar aplicações</span><input type="search" data-launcher-search placeholder="Localizar aplicações da suíte" autocomplete="off"></label>
-                <div class="launcher-grid" data-launcher-grid>
-                    <a class="launcher-item" data-launcher-item data-app-label="Geofeed público" href="${PUBLIC_BASE_URL}"><span class="app-icon app-icon-geofeed" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M4 12h16M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8S9.8 6.3 12 4Z"></path></svg></span><span class="launcher-item-copy"><strong>Geofeed público</strong></span></a>
-                    <a class="launcher-item" data-launcher-item data-app-label="Admin Center" href="${ADMIN_BASE_URL}"><span class="app-icon app-icon-admin" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-2.7 8-7 10-4.3-2-7-5.5-7-10V6l7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg></span><span class="launcher-item-copy"><strong>Admin Center</strong></span></a>
-                    <a class="launcher-item" data-launcher-item data-app-label="ISP Network Health" href="${HEALTH_BASE_URL}"><span class="app-icon app-icon-health" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 15.5a8 8 0 0 1 16 0M7 12.5a5 5 0 0 1 10 0M10 9.5a2 2 0 0 1 4 0M12 18v.1"></path></svg></span><span class="launcher-item-copy"><strong>ISP Network Health</strong></span></a>
-                    <p class="launcher-empty" data-launcher-empty role="status" aria-live="polite" hidden>Nenhuma aplicação encontrada.</p>
-                </div>
-            </div>
-        </details>
-        <a class="brand" href="${PUBLIC_BASE_URL}"><span class="brand-mark" aria-hidden="true">G</span><span><strong>Geofeed público</strong><small>${SUITE_NAME}</small></span></a>
-    </header>
+<a class="skip-link" href="#main-content">Pular para o conteúdo principal</a>
+<main id="main-content">
     <header class="hero">
         <p class="eyebrow">Network Operations Center</p>
         <h1>Geofeed ${COMPANY_NAME}</h1>
@@ -592,6 +594,9 @@
         }());
     </script>
 </main>
-<script src="/app-launcher.js" defer></script>
+<footer class="suite-footer">
+    <span>Desenvolvido por Guilherme Campos</span>
+    <a href="https://www.linkedin.com/in/guilherme-campos353/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn de Guilherme Campos" title="LinkedIn de Guilherme Campos"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 3.5a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2ZM3.5 9h3.4v11.5H3.5V9Zm5.5 0h3.3v1.6h.1c.5-.9 1.7-1.9 3.5-1.9 3.7 0 4.4 2.4 4.4 5.5v6.3h-3.5v-5.6c0-1.3 0-3-1.9-3s-2.1 1.5-2.1 2.9v5.7H9V9Z" /></svg></a>
+</footer>
 </body>
 </html>

@@ -108,6 +108,24 @@ def login_required(view: Callable):
     return wrapped
 
 
+def application_required(application_code: str):
+    """Require a signed-in user whose profile includes the application."""
+
+    def decorator(view: Callable):
+        @functools.wraps(view)
+        def wrapped(*args, **kwargs):
+            user = current_user()
+            if not user:
+                abort(401)
+            if not user.has_application_access(application_code):
+                abort(403)
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
 def roles_required(*roles: str):
     def decorator(view: Callable):
         @functools.wraps(view)
@@ -120,12 +138,29 @@ def roles_required(*roles: str):
                 if required == "super_admin":
                     allowed = allowed or user.is_super_admin()
                 elif required == "admin":
-                    allowed = allowed or user.is_admin()
+                    allowed = allowed or user.has_permission("admin.access")
                 elif required == "editor":
-                    allowed = allowed or user.can_edit()
+                    allowed = allowed or user.has_permission("content.edit")
                 else:
                     allowed = allowed or user.role == required
             if not allowed:
+                abort(403)
+            return view(*args, **kwargs)
+
+        return wrapped
+
+    return decorator
+
+
+def permission_required(permission: str):
+    """Require an explicit profile permission while preserving Super Admin access."""
+    def decorator(view: Callable):
+        @functools.wraps(view)
+        def wrapped(*args, **kwargs):
+            user = current_user()
+            if not user:
+                abort(401)
+            if not user.has_permission(permission):
                 abort(403)
             return view(*args, **kwargs)
 

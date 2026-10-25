@@ -14,13 +14,14 @@ from flask_limiter.util import get_remote_address
 from flask_wtf.csrf import CSRFProtect
 from sqlalchemy import event, inspect, text
 from sqlalchemy.engine import Engine
-from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError, ProgrammingError
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .config import Config
-from .models import Application, InAppNotification, JobFunction, Role, Sector, User, db, utcnow
+from .models import Application, InAppNotification, JobFunction, Role, Sector, ServiceCatalogItem, User, db, utcnow
 from .avatar import AVATAR_PRESET_CONFIGS, AVATAR_PRESETS, avatar_svg, dicebear_catalog
 from .security import current_user, restore_remembered_session
+from isp_shared.assets import register_suite_assets
 
 
 csrf = CSRFProtect()
@@ -38,8 +39,22 @@ def configure_sqlite(connection, _record):
         cursor.close()
 
 
+def _rename_legacy_master_tables(connection) -> None:
+    """Move the first IPAM registries to their Admin Center names."""
+    tables = set(inspect(connection).get_table_names())
+    for legacy_name, canonical_name in (
+        ("ipam_customers", "customers"),
+        ("ipam_pops", "pops_dcs"),
+    ):
+        if legacy_name in tables and canonical_name not in tables:
+            connection.execute(text(f"ALTER TABLE {legacy_name} RENAME TO {canonical_name}"))
+            tables.remove(legacy_name)
+            tables.add(canonical_name)
+
+
 def create_app(test_config: dict | None = None) -> Flask:
     app = Flask(__name__)
+    register_suite_assets(app)
     app.config.from_object(Config)
     if test_config:
         app.config.update(test_config)
@@ -69,15 +84,28 @@ def create_app(test_config: dict | None = None) -> Flask:
     # This additive migration lets an existing installation accept local users
     # before the first request after a deploy, without logging any secrets.
     with app.app_context():
+        migration_lock_connection = None
+        if str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).startswith("postgresql"):
+            # The web process and the worker both create the application at boot.
+            # Hold one PostgreSQL session lock across the complete additive
+            # migration so index/column DDL cannot deadlock during a rollout.
+            migration_lock_connection = db.engine.connect()
+            migration_lock_connection.execute(
+                text("SELECT pg_advisory_lock(hashtext('isp-network-tools-schema-migration'))")
+            )
+            migration_lock_connection.commit()
         try:
             if str(app.config.get("SQLALCHEMY_DATABASE_URI", "")).startswith("postgresql"):
                 with db.engine.begin() as connection:
                     connection.execute(
                         text("SELECT pg_advisory_xact_lock(hashtext('isp-network-tools-admin-schema'))")
                     )
+                    _rename_legacy_master_tables(connection)
                     db.metadata.create_all(bind=connection)
             else:
-                db.create_all()
+                with db.engine.begin() as connection:
+                    _rename_legacy_master_tables(connection)
+                    db.metadata.create_all(bind=connection)
         except OperationalError as exc:
             # Gunicorn and the worker can boot concurrently against SQLite;
             # another process may win the check-then-create race for a table.
@@ -175,10 +203,161 @@ def create_app(test_config: dict | None = None) -> Flask:
             except OperationalError as exc:
                 if "duplicate column name" not in str(exc).lower():
                     raise
+        # Additive migrations for the shared Admin Center registries. The
+        # original installation used a few text fields; they remain in the
+        # schema for compatibility while new screens use the structured data.
+        registry_additions = {
+            "companies": {
+                "cnpj": "VARCHAR(18) NOT NULL DEFAULT ''",
+                "address": "VARCHAR(255) NOT NULL DEFAULT ''",
+                "latitude": "NUMERIC(10, 7)",
+                "longitude": "NUMERIC(10, 7)",
+                "contact_phone": "VARCHAR(64) NOT NULL DEFAULT ''",
+            },
+            "customers": {
+                "cnpj": "VARCHAR(18) NOT NULL DEFAULT ''",
+                "latitude": "NUMERIC(10, 7)",
+                "longitude": "NUMERIC(10, 7)",
+            },
+            "customer_service_items": {
+                "status": "VARCHAR(16) NOT NULL DEFAULT 'active'",
+            },
+            "pops_dcs": {
+                "access_24h": "BOOLEAN NOT NULL DEFAULT FALSE",
+                "battery_autonomy_minutes": "INTEGER NOT NULL DEFAULT 0",
+                "primary_edge_router_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+            },
+            "ipam_allocations": {
+                "parent_id": "INTEGER REFERENCES ipam_allocations(id) ON DELETE RESTRICT",
+                "company_id": "INTEGER REFERENCES companies(id) ON DELETE RESTRICT",
+                "geofeed_region": "VARCHAR(16) NOT NULL DEFAULT ''",
+                "approval_status": "VARCHAR(16) NOT NULL DEFAULT 'approved'",
+                "equipment_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "router_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "cpe_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "access_type": "VARCHAR(16) NOT NULL DEFAULT 'fiber'",
+                "access_type_2": "VARCHAR(16) NOT NULL DEFAULT 'fiber'",
+                "pop_2_id": "INTEGER REFERENCES pops_dcs(id) ON DELETE SET NULL",
+                "router_2_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "switch_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "switch_2_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "access_point_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "access_point_2_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "st_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "st_2_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "metadata_incomplete": "BOOLEAN NOT NULL DEFAULT FALSE",
+                "metadata_warning": "VARCHAR(255) NOT NULL DEFAULT ''",
+            },
+            "ipam_equipments": {
+                "equipment_type": "VARCHAR(16) NOT NULL DEFAULT 'other'",
+                "pop_id": "INTEGER REFERENCES pops_dcs(id) ON DELETE SET NULL",
+                "secondary_pop_id": "INTEGER REFERENCES pops_dcs(id) ON DELETE SET NULL",
+                "customer_id": "INTEGER REFERENCES customers(id) ON DELETE SET NULL",
+                "router_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "secondary_router_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "cpe_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+                "access_point_id": "INTEGER REFERENCES ipam_equipments(id) ON DELETE SET NULL",
+            },
+        }
+        for table_name, table_additions in registry_additions.items():
+            existing_columns = {column["name"] for column in inspect(db.engine).get_columns(table_name)}
+            for name, definition in table_additions.items():
+                if name in existing_columns:
+                    continue
+                try:
+                    with db.engine.begin() as connection:
+                        connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN {name} {definition}"))
+                except (OperationalError, ProgrammingError) as exc:
+                    sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", "")
+                    duplicate_column = sqlstate == "42701" or "duplicate column name" in str(exc).lower()
+                    if not duplicate_column and "already exists" not in str(exc).lower():
+                        raise
+        # Carry forward the former customer document when it was already
+        # populated. Empty values are intentionally allowed only for legacy
+        # rows; all new forms require a validated CNPJ.
+        with db.engine.begin() as connection:
+            connection.execute(text("UPDATE customers SET cnpj = document WHERE cnpj = '' AND document <> ''"))
+            connection.execute(text("UPDATE customer_service_items SET status = 'active' WHERE status IS NULL OR status = ''"))
+            connection.execute(text("UPDATE ipam_allocations SET router_id = equipment_id WHERE router_id IS NULL AND equipment_id IS NOT NULL"))
+            # Recover unambiguous POP/customer context for legacy equipment.
+            # Ambiguous records remain untouched so no assignment is guessed.
+            connection.execute(text(
+                "UPDATE ipam_equipments SET pop_id = ("
+                "SELECT MIN(a.pop_id) FROM ipam_allocations a "
+                "WHERE (a.router_id = ipam_equipments.id OR a.equipment_id = ipam_equipments.id) "
+                "AND a.pop_id IS NOT NULL"
+                ") WHERE pop_id IS NULL AND ("
+                "SELECT COUNT(DISTINCT a.pop_id) FROM ipam_allocations a "
+                "WHERE (a.router_id = ipam_equipments.id OR a.equipment_id = ipam_equipments.id) "
+                "AND a.pop_id IS NOT NULL"
+                ") = 1"
+            ))
+            connection.execute(text(
+                "UPDATE ipam_equipments SET customer_id = ("
+                "SELECT MIN(a.customer_id) FROM ipam_allocations a "
+                "WHERE (a.cpe_id = ipam_equipments.id OR a.equipment_id = ipam_equipments.id) "
+                "AND a.customer_id IS NOT NULL"
+                ") WHERE customer_id IS NULL AND equipment_type = 'cpe' AND ("
+                "SELECT COUNT(DISTINCT a.customer_id) FROM ipam_allocations a "
+                "WHERE (a.cpe_id = ipam_equipments.id OR a.equipment_id = ipam_equipments.id) "
+                "AND a.customer_id IS NOT NULL"
+                ") = 1"
+            ))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_router_id ON ipam_allocations(router_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_cpe_id ON ipam_allocations(cpe_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_equipments_equipment_type ON ipam_equipments(equipment_type)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_equipments_pop_id ON ipam_equipments(pop_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_equipments_customer_id ON ipam_equipments(customer_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_pop_2_id ON ipam_allocations(pop_2_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_router_2_id ON ipam_allocations(router_2_id)"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_companies_cnpj_nonempty ON companies(cnpj) WHERE cnpj <> ''"))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_customers_cnpj_nonempty ON customers(cnpj) WHERE cnpj <> ''"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_equipment_id ON ipam_allocations(equipment_id)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_geofeed_region ON ipam_allocations(geofeed_region)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_ipam_allocations_metadata_incomplete ON ipam_allocations(metadata_incomplete)"))
+            duplicate_users = connection.execute(text(
+                "SELECT user_id FROM user_group_members GROUP BY user_id HAVING COUNT(*) > 1"
+            )).scalars().all()
+            for user_id in duplicate_users:
+                keep = connection.execute(text(
+                    "SELECT MIN(group_id) FROM user_group_members WHERE user_id = :user_id"
+                ), {"user_id": user_id}).scalar_one()
+                connection.execute(text(
+                    "DELETE FROM user_group_members WHERE user_id = :user_id AND group_id <> :group_id"
+                ), {"user_id": user_id, "group_id": keep})
+            connection.execute(text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_user_group_members_user_unique "
+                "ON user_group_members(user_id)"
+            ))
         default_roles = [
             ("super_admin", "Super Admin", "Acesso total ao portal.", ["*"]),
-            ("admin", "Administrador", "Gerencia empresas, blocos e aprovações.", ["admin.access", "content.edit", "approvals.review", "monitoring.run"]),
-            ("editor", "Técnico", "Propõe alterações sujeitas a aprovação.", ["content.edit"]),
+            ("admin", "Administrador", "Gerencia cadastros mestres, blocos e aprovações.", [
+                "app.admin_center.access", "app.ipam_geofeed.access", "app.isp_network_health.access",
+                "dashboard.view", "audit.view", "admin.access", "content.edit", "approvals.review", "monitoring.run",
+                "catalog.companies.view", "catalog.companies.manage",
+                "catalog.customers.view", "catalog.customers.manage",
+                "catalog.pops.view", "catalog.pops.manage",
+                "catalog.services.view", "catalog.services.manage",
+                "ipam.private.manage", "ipam.public.submit", "ipam.public.approve", "ipam.public.reject", "ipam.equipment.manage", "ipam.publish",
+                "health.view", "health.run", "health.report.export",
+            ]),
+            ("ipam_operator", "Operador IPAM", "Administra o inventário e envia recursos públicos para aprovação.", [
+                "app.admin_center.access", "app.ipam_geofeed.access", "dashboard.view", "content.edit",
+                "catalog.companies.view", "catalog.companies.manage",
+                "catalog.customers.view", "catalog.customers.manage",
+                "catalog.pops.view", "catalog.pops.manage",
+                "catalog.services.view", "catalog.services.manage",
+                "ipam.private.manage", "ipam.public.submit", "ipam.equipment.manage",
+            ]),
+            ("health_operator", "Operador Network Health", "Executa análises e consulta relatórios de saúde.", [
+                "app.admin_center.access", "app.isp_network_health.access", "dashboard.view",
+                "health.view", "health.run", "health.report.export",
+            ]),
+            ("viewer", "Consulta", "Acesso somente para leitura.", [
+                "app.admin_center.access", "dashboard.view", "audit.view",
+                "catalog.companies.view", "catalog.customers.view", "catalog.pops.view",
+                "catalog.services.view", "health.view",
+            ]),
         ]
         for code, name, description, permissions in default_roles:
             role = Role.query.filter_by(code=code).first()
@@ -197,10 +376,17 @@ def create_app(test_config: dict | None = None) -> Flask:
             role.description = description
             role.permissions = json.dumps(permissions, separators=(",", ":"))
             role.system = True
+        # Keep the legacy role code readable while moving existing users to
+        # the profile that preserves the former editor workflow.
+        db.session.execute(text("UPDATE users SET role = 'ipam_operator' WHERE role = 'editor'"))
+        legacy_editor = Role.query.filter_by(code="editor").first()
+        if legacy_editor:
+            legacy_editor.active = False
         application_defaults = [
             ("geofeed_public", "Geofeed público", "Feed aprovado e downloads públicos.", True, 10),
-            ("admin_center", "Admin Center", "Administração do Geofeed e da suíte.", False, 20),
-            ("isp_network_health", "ISP Network Health", "Diagnósticos de reputação e rede.", False, 30),
+            ("admin_center", "Admin Center", "Visão geral, auditoria e configurações da suíte.", False, 20),
+            ("ipam_geofeed", "IPAM/Geofeed", "Inventário IP, alocações e publicação Geofeed.", False, 30),
+            ("isp_network_health", "ISP Network Health", "Diagnósticos de reputação e rede.", False, 40),
         ]
         for code, name, description, public, sort_order in application_defaults:
             application = Application.query.filter_by(code=code).first()
@@ -220,7 +406,46 @@ def create_app(test_config: dict | None = None) -> Flask:
                     db.session.flush()
                 except IntegrityError:
                     db.session.rollback()
+        service_defaults = []
+        bandwidths = ("50 Mb/s", "100 Mb/s", "200 Mb/s", "400 Mb/s", "500 Mb/s", "1 Gb/s")
+        for service_type, prefix in (
+            ("Link IP", "Link IP"),
+            ("MPLS/L2L", "MPLS/L2L"),
+            ("Port de Capacidade Agregada", "Port de Capacidade Agregada (Link IP + MPLS)"),
+        ):
+            for bandwidth in bandwidths:
+                service_defaults.append((f"{prefix} {bandwidth}", service_type, bandwidth))
+        for bandwidth in bandwidths:
+            service_defaults.append((f"Link IP {bandwidth} · Segunda abordagem", "Link IP", f"{bandwidth} · Segunda abordagem"))
+        for model in ("40", "60", "100", "200", "400"):
+            for license_name in ("Standard", "Enterprise", "UTP"):
+                service_defaults.append((f"Firewall Fortigate {model} · Licença {license_name}", "Firewall", f"Fortigate {model} · {license_name}"))
+        service_defaults.extend((
+            ("Backup gerenciado", "Serviço gerenciado", ""),
+            ("Cloud Privada", "Cloud", ""),
+            ("Colocation", "Datacenter", ""),
+            ("Cloud Connect", "Cloud", ""),
+        ))
+        for service_name, service_type, specification in service_defaults:
+            code = re.sub(r"[^a-z0-9]+", "-", service_name.casefold()).strip("-")[:80]
+            if not ServiceCatalogItem.query.filter_by(code=code).first():
+                db.session.add(ServiceCatalogItem(
+                    code=code,
+                    name=service_name,
+                    service_type=service_type,
+                    specification=specification,
+                    active=True,
+                ))
         db.session.commit()
+
+        if migration_lock_connection is not None:
+            try:
+                migration_lock_connection.execute(
+                    text("SELECT pg_advisory_unlock(hashtext('isp-network-tools-schema-migration'))")
+                )
+                migration_lock_connection.commit()
+            finally:
+                migration_lock_connection.close()
 
     from .settings import get_setting
     with app.app_context():
@@ -229,6 +454,12 @@ def create_app(test_config: dict | None = None) -> Flask:
         client_secret = get_setting("entra.client_secret", app.config.get("ENTRA_CLIENT_SECRET"))
         google_client_id = get_setting("google.client_id", app.config.get("GOOGLE_CLIENT_ID"))
         google_client_secret = get_setting("google.client_secret", app.config.get("GOOGLE_CLIENT_SECRET"))
+        # OIDC settings may be stored in the database so an imported
+        # installation does not need to duplicate non-secret identity
+        # settings in its environment. Keep the Flask config in sync because
+        # the callback validates the tenant against it.
+        app.config["ENTRA_TENANT_ID"] = tenant or app.config.get("ENTRA_TENANT_ID", "")
+        app.config["ENTRA_CLIENT_ID"] = client_id or app.config.get("ENTRA_CLIENT_ID", "")
     if tenant and client_id and client_secret:
         oauth.register(
             name="entra",
@@ -333,6 +564,7 @@ def create_app(test_config: dict | None = None) -> Flask:
                     "url": {
                         "geofeed_public": app.config.get("PUBLIC_BASE_URL"),
                         "admin_center": url_for("panel.dashboard") if user else app.config.get("ADMIN_BASE_URL"),
+                        "ipam_geofeed": url_for("panel.ipam") if user else f"{app.config.get('ADMIN_BASE_URL', '').rstrip('/')}/ipam",
                         "isp_network_health": url_for("panel.issue_sso", target="isp_network_health") if user else app.config.get("HEALTH_BASE_URL"),
                     }.get(application.code, application.url),
                     "available": (

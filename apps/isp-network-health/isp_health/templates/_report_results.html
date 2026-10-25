@@ -1,0 +1,31 @@
+{% if result_groups %}
+<section class="report-area report-results">
+  <div class="report-section-heading">
+    <div>
+      <h3>{{ report_stats.results_heading }}</h3>
+      <p class="muted">{% if report_stats.summary_only %}Os blocos /24 começam recolhidos. Abra um bloco para consultar cada endereço IP.{% else %}Cada IP aparece uma única vez. O botão indica o resultado consolidado; passe o mouse ou use o foco sobre ele para ver todas as blacklists consultadas.{% endif %}</p>
+    </div>
+    {% if not report_stats.summary_only %}<div class="report-section-actions" aria-label="Controles dos resultados"><button class="button button-small" type="button" data-report-expand>Expandir todos</button><button class="button button-small" type="button" data-report-collapse>Recolher todos</button></div>{% endif %}
+  </div>
+  <div class="result-groups">
+    {% for group in result_groups %}{% set group_index = loop.index %}
+    <details class="result-group result-group-{{ group.tone }}" data-report-section{% if group.lazy %} data-report-block data-block-url="{{ url_for('scan_report_block', scan_id=selected_scan.id, block=group.block) }}"{% endif %}>
+      <summary>
+        <span class="result-group-title"><strong>{{ group.display_block }}</strong><small>{{ group.ip_count }} endereços IP · {{ group.detected_count }} listados{% if group.lazy %} · {{ group.listed_percent }}% do bloco{% else %} · {{ group.incomplete_count }} inconclusivos · {{ group.all_blacklists_count }} blacklists consultadas{% endif %}</small></span>
+        <span class="result-group-count">{% if group.lazy %}{{ group.listed_percent }}% listado{% else %}{{ group.ip_count }} {{ 'IP' if group.ip_count == 1 else 'IPs' }}{% endif %}</span>
+      </summary>
+      <div class="result-group-body">
+        {% if group.lazy %}<div data-report-block-body><p class="muted">Abra o bloco para carregar os endereços IP.</p></div>
+        {% else %}
+          {% if group.network_findings %}<p class="report-note report-note-warning">Detecção em consulta de rede: {{ group.network_findings|join(', ') }}.</p>{% endif %}
+          <div class="result-table-wrap"><table class="result-table"><thead><tr><th>{{ 'Domínio' if group.is_domain else 'Endereço IP' }}</th><th>Blacklists consultadas</th><th>Resultado</th></tr></thead><tbody>
+          {% for row in group.rows %}{% set row_status = 'listed' if row.has_detection else 'error' if row.is_incomplete else 'clean' %}{% set row_label = 'Listado' if row.has_detection else 'Erro' if row.is_incomplete else 'Limpo' %}{% set row_count = row.detected_blacklists|length if row.has_detection else row.incomplete_blacklists|length if row.is_incomplete else row.consulted_count %}
+          <tr><td><code>{{ row.ip }}</code></td><td><div class="blacklist-cell"><button class="blacklist-status-button blacklist-status-{{ row_status }}" type="button" aria-describedby="blacklist-list-{{ selected_scan.id }}-{{ group_index }}-{{ loop.index }}">{{ row_label }} ({{ row_count }})</button><div class="blacklist-tooltip" id="blacklist-list-{{ selected_scan.id }}-{{ group_index }}-{{ loop.index }}" role="tooltip"><strong>Lista completa · {{ row.consulted_count }} fontes</strong><div class="blacklist-tooltip-list">{% for blacklist in row.blacklists %}<span class="blacklist-chip blacklist-chip-{{ blacklist.tone }}" title="{{ blacklist.title }}">{{ blacklist.name }}</span>{% endfor %}</div></div></div></td><td><span class="result-status result-status-{{ 'listed' if row.has_detection else 'warning' if row.is_incomplete else 'clean' }}">{{ 'Detectado' if row.has_detection else 'Não concluído' if row.is_incomplete else 'Limpo' }}</span></td></tr>
+          {% endfor %}</tbody></table></div>
+        {% endif %}
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}

@@ -28,6 +28,19 @@ Este mapa usa o OWASP Top 10 como baseline. A revisão foi aplicada ao primeiro 
 
 Não foram encontrados novos caminhos de alteração de estado nas telas desta entrega. As rotas existentes continuam protegidas por autorização no servidor e CSRF conforme a matriz atual.
 
+## Revisão desta alteração: IPAM/Geofeed e auditoria unificada
+
+| Área | Verificação | Estado |
+| --- | --- | --- |
+| Entitlement | `/ipam` e todas as rotas de cadastro exigem o entitlement `ipam_geofeed` no servidor; edição e exclusão ainda exigem o papel compatível | Implementado |
+| Integridade de inventário | CIDR/IP são normalizados, bloco pai é validado, coordenadas são limitadas e alocações sobrepostas no mesmo escopo são recusadas | Implementado |
+| Separação de dados | Cadastros mestres de Cliente e POP/DC, endereço exato, GPS, VLAN, VRF e notas ficam fora do snapshot público; o IPAM apenas referencia esses registros | Implementado |
+| Geofeed | A interface identifica as cinco colunas atuais (`ip_prefix`, `alpha2code`, `region`, `city`, `postal_code`); nenhum campo operacional é exportado | Implementado |
+| Dados relacionados | Cliente e POP/DC são selecionados por IDs existentes; os detalhes exibidos no hover são escapados pelo Jinja | Implementado |
+| Auditoria | Logs do Admin Center e IPAM são filtrados por aplicação; eventos de scan do Health chegam por endpoint interno HMAC e o endpoint sem token retorna 403 | Implementado |
+
+O endpoint interno de auditoria do Health não é exposto pelo lançador nem por rota pública: ele aceita somente o token HMAC derivado do segredo SSO e fica disponível na rede interna da stack.
+
 ## Regras obrigatórias
 
 - esconder uma aplicação no lançador nunca substitui autorização de rota ou API;

@@ -1,0 +1,40 @@
+{% if current_user.can_edit() and parent_network.version == 4 and 24 <= parent_network.prefixlen < 32 %}
+<tr class="ipam-child-toolbar" data-ipam-child data-ipam-child-toolbar data-parent-key="{{ request.args.get('parent_key', '') }}">
+  <td colspan="11">
+    <div>
+      <span><strong>{{ parent_network }}</strong><small>Calcule uma sub-rede alinhada antes de cadastrá-la.</small></span>
+      <button class="button button-secondary" type="button" data-subnet-planner data-owner-id="{{ owner.id }}" data-parent-prefix="{{ parent_network }}" data-parent-id="{{ form_parent.id }}" data-company-id="{{ owner.company_id or '' }}" data-source-block-id="{{ owner.source_block_id or '' }}">Criar bloco filho</button>
+    </div>
+  </td>
+</tr>
+{% endif %}
+{% for node in nodes %}
+{% if node.allocation %}{% set action_url = url_for('panel.ipam_allocation_edit', allocation_id=node.allocation.id) %}{% else %}{% set action_url = url_for('panel.ipam_allocation_new', resource_kind='block', prefix=node.prefix, parent_id=form_parent.id, company_id=owner.company_id, source_block_id=owner.source_block_id) %}{% endif %}
+<tr class="{% if node.grouped %}ipam-grouped-row{% endif %}" data-ipam-row data-ipam-child data-node-key="{{ request.args.get('parent_key', '') }}::{{ node.prefix }}" data-parent-key="{{ request.args.get('parent_key', '') }}" data-owner-id="{{ owner.id }}" data-prefix="{{ node.prefix }}" data-depth="{{ (request.args.get('depth', '0')|int) + 1 }}">
+  <td>
+    <div class="ipam-resource-cell" style="--ipam-depth: {{ (request.args.get('depth', '0')|int) + 1 }}">
+      <button class="ipam-resource-link{% if not node.has_children %} is-leaf{% endif %}" type="button" data-ipam-tree-toggle data-ipam-has-children="{{ 'true' if node.has_children else 'false' }}"{% if node.has_children %} aria-expanded="false"{% elif current_user.can_edit() %} data-ipam-resource-action="{{ action_url }}"{% endif %} title="{{ 'Abrir itens filhos' if node.has_children else ('Editar informações' if node.allocation else 'Cadastrar informações') }}">
+        {% if node.has_children %}<span class="ipam-tree-chevron" aria-hidden="true">›</span>{% else %}<span class="ipam-tree-spacer" aria-hidden="true"></span>{% endif %}
+        <strong class="mono">{{ node.display }}</strong>
+      </button>{% if node.allocation and node.allocation.metadata_incomplete %}<button class="review-warning" type="button" data-warning data-warning-message="{{ node.allocation.metadata_warning or 'Faltam informações cadastrais neste bloco pai.' }}" aria-label="Informações cadastrais incompletas" title="{{ node.allocation.metadata_warning or 'Faltam informações cadastrais neste bloco pai.' }}">⚠</button>{% endif %}
+      <small class="cell-sub">{% if node.grouped %}<span class="badge badge-grouped">Agrupado /{{ node.network.prefixlen }} · {{ node.network.num_addresses }} IPs</span>{% else %}{{ 'Endereço IP' if node.network.prefixlen == node.network.max_prefixlen else 'Sub-rede' }}{% endif %}</small>
+    </div>
+  </td>
+  <td><span class="badge badge-scope-{{ owner.scope }}">{{ 'Público' if owner.scope == 'public' else 'Privado' }}</span></td>
+  <td>{% if node.allocation %}<span class="badge badge-{{ 'ok' if node.display_status in ['allocated', 'in_use'] else 'pending' if node.display_status == 'reserved' else 'muted' }}">{{ 'Em uso' if node.display_status == 'in_use' else statuses.get(node.display_status, node.display_status) }}</span>{% elif node.source == 'Disponível' %}<span class="badge badge-muted">Disponível</span>{% else %}<span class="badge badge-ok">Publicado</span>{% endif %}</td>
+  <td>{% if owner.company %}{{ owner.company.name }}<small class="cell-sub">AS{{ owner.company.default_asn }}</small>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td><span class="muted">{{ node.effective.get('allocation_address') or '—' }}</span></td>
+  <td>{% if node.effective_customer %}{{ node.effective_customer.name }}{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td>{% if node.effective_pop %}{{ node.effective_pop.code }}{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td>{% if node.effective_router %}{{ node.effective_router.name }}<small class="cell-sub">{{ node.effective_router.code }}</small>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td>{% if node.effective_cpe %}{{ node.effective_cpe.name }}<small class="cell-sub">{{ node.effective_cpe.code }}</small>{% else %}<span class="muted">—</span>{% endif %}</td>
+  <td><span class="badge {{ 'badge-ok' if node.source == 'Último Geofeed publicado' else 'badge-muted' }}">{{ node.source }}</span></td>
+  <td class="row-actions">
+    {% if current_user.can_edit() %}
+    <a class="text-link" data-quick-create href="{{ action_url }}">{{ 'Editar' if node.allocation else 'Cadastrar' }}</a>
+    {% endif %}
+  </td>
+</tr>
+{% else %}
+<tr data-ipam-child data-parent-key="{{ request.args.get('parent_key', '') }}"><td colspan="11" class="empty-state">Nenhum item filho encontrado neste prefixo.</td></tr>
+{% endfor %}

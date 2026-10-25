@@ -14,7 +14,7 @@ test:
 compose-config:
 	test -f .env || cp .env.example .env
 	SECRETS_DIR=$${SECRETS_DIR:-.local/secrets} ./scripts/bootstrap-secrets.sh
-	docker compose config --quiet
+	docker compose -p $${COMPOSE_PROJECT_NAME:-isp-network-tools} config --quiet
 
 secret-check:
 	./scripts/secret-check.sh

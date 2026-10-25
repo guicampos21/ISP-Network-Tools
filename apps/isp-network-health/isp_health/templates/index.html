@@ -6,13 +6,15 @@
   <meta name="theme-color" content="#0b0910">
   <meta name="robots" content="noindex,nofollow,noarchive">
   <title>ISP Network Health</title>
-  {% if selected_scan and selected_scan.status in ['queued', 'running'] %}<meta http-equiv="refresh" content="10">{% endif %}
-  <link rel="stylesheet" href="{{ url_for('static', filename='health.css') }}">
-  <script src="{{ url_for('static', filename='health.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='health.css', v='20260922-scan-row-meta-1') }}">
+  <link rel="stylesheet" href="{{ url_for('suite_header_css', v='20260918-footer-4') }}">
+  <script src="{{ url_for('static', filename='health.js', v='20260922-user-scans-1') }}" defer></script>
 </head>
-<body class="{% if selected_scan %}has-selected-scan{% endif %}">
-  <main class="shell">
-    <header class="topbar">
+{% set report_only = report_only|default(false) %}
+<body class="{% if report_only %}report-only has-suite-footer{% else %}has-suite-footer{% if selected_scan %} has-selected-scan{% endif %}{% endif %}" data-health-authenticated="{{ 'true' if health_user else 'false' }}">
+{% if not report_only %}
+  <a class="skip-link" href="#main-content">Pular para o conteúdo principal</a>
+  <header class="topbar suite-topbar">
       <div class="header-start">
         <details class="app-launcher" data-app-launcher>
           <summary class="launcher-trigger" data-launcher-trigger aria-label="Abrir aplicações" aria-controls="suite-launcher-panel" aria-expanded="false" title="Aplicações"><span class="launcher-grid-icon" aria-hidden="true">{% for _ in range(9) %}<i></i>{% endfor %}</span></summary>
@@ -20,70 +22,122 @@
             <div class="launcher-heading"><div><span class="launcher-overline">{{ suite_name }}</span><strong>Aplicações</strong></div><button class="launcher-close" type="button" data-launcher-close aria-label="Fechar aplicações">×</button></div>
             <label class="launcher-search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"></circle><path d="m16 16 5 5"></path></svg><span class="sr-only">Pesquisar aplicações</span><input type="search" data-launcher-search placeholder="Localizar aplicações da suíte" autocomplete="off"></label>
             <div class="launcher-grid" data-launcher-grid>
-            {% for application in application_links %}<a class="launcher-item" data-launcher-item data-app-label="{{ application.name }}" href="{{ application.url }}"><span class="app-icon app-icon-{{ application.code|replace('_', '-') }}" aria-hidden="true">{% if application.code == 'geofeed_public' %}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M4 12h16M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8S9.8 6.3 12 4Z"></path></svg>{% elif application.code == 'admin_center' %}<svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-2.7 8-7 10-4.3-2-7-5.5-7-10V6l7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg>{% else %}<svg viewBox="0 0 24 24"><path d="M4 15.5a8 8 0 0 1 16 0M7 12.5a5 5 0 0 1 10 0M10 9.5a2 2 0 0 1 4 0M12 18v.1"></path></svg>{% endif %}</span><span class="launcher-item-copy"><strong>{{ application.name }}</strong></span></a>{% endfor %}
+            {% for application in application_links %}<a class="launcher-item" data-launcher-item data-app-label="{{ application.name }}" href="{{ application.url }}"{% if application.code == 'geofeed_public' %} target="_blank" rel="noopener noreferrer"{% endif %}><span class="app-icon app-icon-{{ application.code|replace('_', '-') }}" aria-hidden="true">{% if application.code == 'geofeed_public' %}<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"></circle><path d="M4 12h16M12 4c2.2 2.3 3.2 5 3.2 8s-1 5.7-3.2 8c-2.2-2.3-3.2-5-3.2-8S9.8 6.3 12 4Z"></path></svg>{% elif application.code == 'admin_center' %}<svg viewBox="0 0 24 24"><path d="M12 3 19 6v5c0 4.5-2.7 8-7 10-4.3-2-7-5.5-7-10V6l7-3Z"></path><path d="m9 12 2 2 4-4"></path></svg>{% elif application.code == 'ipam_geofeed' %}<svg viewBox="0 0 24 24"><path d="m12 3 7 4v8l-7 4-7-4V7l7-4Z"></path><path d="m5 7 7 4 7-4M12 11v8M8 17v4l4 2 4-2v-4"></path></svg>{% else %}<svg viewBox="0 0 24 24"><path d="M4 15.5a8 8 0 0 1 16 0M7 12.5a5 5 0 0 1 10 0M10 9.5a2 2 0 0 1 4 0M12 18v.1"></path></svg>{% endif %}</span><span class="launcher-item-copy"><strong>{{ application.name }}</strong></span></a>{% endfor %}
               <p class="launcher-empty" data-launcher-empty role="status" aria-live="polite" hidden>Nenhuma aplicação encontrada.</p>
             </div>
           </div>
         </details>
-        <a class="brand" href="{{ url_for('index') }}"><span class="brand-mark" aria-hidden="true">H</span><span><strong>ISP Network Health</strong><small>{{ health_user.name or health_user.email }}</small></span></a>
+        <a class="brand" href="{{ url_for('index') }}"><span class="app-icon app-icon-isp-network-health" aria-hidden="true"><svg viewBox="0 0 48 48"><path d="M5 25h7l4-10 7 19 5-14 4 5h11"></path><circle cx="10" cy="25" r="2.2"></circle><circle cx="38" cy="25" r="2.2"></circle></svg></span><span><strong>ISP Network Health</strong><small>{{ suite_name }}</small></span></a>
       </div>
-      <div class="form-actions"><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button" type="submit">Sair</button></form></div>
-    </header>
+      <nav class="suite-header-nav" aria-label="Admin Center"><a href="{{ admin_center_url }}/">Dashboard</a><a href="{{ admin_center_url }}/cadastro">Cadastro</a>{% if (health_user.profile or health_user.role) in ['admin','super_admin'] %}<a href="{{ admin_center_url }}/audit">Auditoria</a>{% endif %}{% if (health_user.profile or health_user.role) == 'super_admin' %}<a href="{{ admin_center_url }}/settings">Configurações</a>{% endif %}</nav>
+      <div class="header-end">
+        <time class="suite-clock" data-suite-clock datetime="" aria-label="Data e hora atual"></time>
+        <a class="notification-link" href="{{ admin_center_url.rstrip('/') }}/notifications" aria-label="Notificações no Admin Center" title="Notificações"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"></path></svg></a>
+        <details class="account-menu">
+          <summary class="account-trigger"><span class="account-avatar account-initials">{{ (health_user.name or health_user.email)[:1]|upper }}</span><span><strong>{{ health_user.name or health_user.email }}</strong><small>{{ {'super_admin':'Super admin','admin':'Administrador','ipam_operator':'Operador IPAM','health_operator':'Operador Network Health','viewer':'Consulta','editor':'Operador IPAM'}.get(health_user.profile or health_user.role, health_user.profile or health_user.role or 'Usuário') }}</small></span></summary>
+          <div class="account-dropdown"><form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="link-button" type="submit">Sair</button></form></div>
+        </details>
+      </div>
+  </header>
+  {% endif %}
+  <main id="main-content" class="{{ 'report-only-shell' if report_only else 'shell' }}">
+  {% if not report_only %}
+    {% if (health_user.profile or health_user.role) == 'super_admin' %}<div class="health-layout"><aside class="health-sidebar card" aria-label="Menu do Network Health"><p class="eyebrow">Aplicação</p><strong>ISP Network Health</strong><nav aria-label="Áreas de análises"><a href="{{ url_for('index') }}"{% if not admin_view %} aria-current="page"{% endif %}>Meus Scans</a><a href="{{ url_for('user_scans') }}"{% if admin_view %} aria-current="page"{% endif %}>Scan dos usuários</a></nav></aside><div class="health-content">{% endif %}
     <section class="heading page-heading">
-      <div><p class="eyebrow">Diagnóstico operacional</p><h1>Saúde da sua rede</h1><p class="muted">Analise a reputação de domínios, IPv4, blocos CIDR e ASNs com execução em segundo plano.</p></div>
+      <div><p class="eyebrow">Diagnóstico operacional</p><h1>{{ 'Scan dos usuários' if admin_view else 'Meus Scans' if (health_user.profile or health_user.role) == 'super_admin' else 'Saúde da sua rede' }}</h1><p class="muted">{{ 'Acompanhe o histórico, inicie, pare ou retome análises dos usuários.' if admin_view else 'Analise a reputação de domínios, IPv4, blocos CIDR e ASNs com execução em segundo plano.' }}</p></div>
     </section>
     <div class="flash-messages">{% with messages = get_flashed_messages(with_categories=true) %}{% for category,message in messages %}<p class="status status-{{ category }}">{{ message }}</p>{% endfor %}{% endwith %}</div>
+    {% if admin_view %}
+    <section class="card setup-card"><div class="card-heading"><div><h2>Iniciar análise para usuário</h2><p class="muted">A análise pertence ao usuário escolhido e continua disponível em seu histórico.</p></div></div><form method="post" action="{{ url_for('create_user_scan') }}" class="admin-scan-form"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>Usuário<select name="subject" required><option value="">Selecione um usuário</option>{% for item in users_directory %}<option value="{{ item.subject }}"{% if selected_subject == item.subject %} selected{% endif %}>{{ item.name }} · {{ item.email }}</option>{% endfor %}</select></label><label>Alvo<input name="target" maxlength="253" required placeholder="exemplo.com, 127.0.0.2 ou 203.0.113.0/24" autocomplete="off"></label><label>Perfil<select name="profile"><option value="conservative">Conservador</option><option value="aggressive">Agressivo</option></select></label><button class="button button-primary" type="submit">Iniciar scan</button></form></section>
+    {% else %}
     <div class="grid setup-grid">
       <section class="card setup-card">
         <div class="card-heading"><div><h2>Nova análise</h2><p class="muted">As consultas externas são executadas pelo worker.</p></div></div>
         <form method="post" action="{{ url_for('create_scan_route') }}">
           <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-          <label>Alvo<input name="target" maxlength="253" required placeholder="exemplo.com ou 203.0.113.25/28" autocomplete="off"></label>
+          <label>Alvo<input name="target" maxlength="253" required placeholder="exemplo.com, dbltest.com ou 127.0.0.2" autocomplete="off"></label>
           <label>Perfil<select name="profile"><option value="conservative">Conservador</option><option value="aggressive">Agressivo</option></select></label>
           <div class="form-actions"><button class="button button-primary" type="submit">Enfileirar análise</button></div>
         </form>
       </section>
       <section class="card setup-card">
         <div class="card-heading"><div><h2>Regras da coleta</h2><p class="muted">O serviço aplica as mesmas regras do núcleo INH.</p></div></div>
-        <ul class="muted"><li>Somente IPv4 público e globalmente roteável.</li><li>DNSBL, RDAP, WHOIS e fontes externas têm timeout.</li><li>Uma análise ativa por usuário.</li><li>Resultados ficam isolados por usuário.</li></ul>
+        <ul class="muted"><li>IPv4 público e globalmente roteável, com suporte ao endereço de teste DNSBL 127.0.0.2.</li><li>Domínios sem registro A ainda podem ser consultados em DBL e RHSBL.</li><li>DNSBL, RDAP, WHOIS e fontes externas têm timeout.</li><li>Uma análise ativa por usuário.</li><li>Resultados ficam isolados por usuário.</li></ul>
       </section>
     </div>
+    {% endif %}
     <section class="card history scan-history">
-      <div class="card-heading"><div><h2>Histórico recente</h2><p class="muted">Até 40 análises do usuário atual.</p></div></div>
+      <div class="card-heading"><div><h2>{{ 'Histórico dos usuários' if admin_view else 'Histórico recente' }}</h2><p class="muted">{{ 'Todas as análises, 50 por página.' if admin_view else 'Até 40 análises do usuário atual.' }}</p></div>{% if admin_view %}<form method="get" action="{{ url_for('user_scans') }}" class="history-filter"><label>Filtrar usuário<select name="subject" onchange="this.form.submit()"><option value="">Todos</option>{% for item in users_directory %}<option value="{{ item.subject }}"{% if selected_subject == item.subject %} selected{% endif %}>{{ item.name }} · {{ item.email }}</option>{% endfor %}</select></label></form>{% endif %}</div>
       <div class="scan-list">
       {% for scan in scans %}
+        <div class="scan-history-entry{% if scan.status == 'running' or scan.status == 'queued' %} scan-history-entry-live{% endif %}" data-scan-entry{% if scan.status == 'running' or scan.status == 'queued' %} data-scan-entry-live{% endif %} data-scan-status="{{ scan.status }}" data-scan-url="{{ url_for('scan_detail', scan_id=scan.id) }}">
         <div class="scan-row">
-          <div><a href="{{ url_for('scan_detail', scan_id=scan.id) }}"><strong>#{{ scan.id }} · {{ scan.target }}</strong></a><div class="scan-meta"><span>{{ scan.target_kind|upper }}</span><span>{{ scan.created_at }}</span><span>{{ {'queued':'na fila','running':'executando','succeeded':'concluída','failed':'falhou','canceled':'cancelada'}.get(scan.status, scan.status) }}</span></div></div>
-          <span class="status status-{{ scan.status }}">{{ {'queued':'na fila','running':'executando','succeeded':'concluída','failed':'falhou','canceled':'cancelada'}.get(scan.status, scan.status) }}</span>
+          <div class="scan-target"><button class="scan-open-button" type="button" data-scan-toggle data-scan-url="{{ url_for('scan_detail', scan_id=scan.id) }}" aria-controls="scan-preview-{{ scan.id }}" aria-expanded="false" aria-label="Expandir análise {{ scan.reference }}" title="Expandir análise"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg></button><span><strong>{{ scan.target }}</strong>{% if admin_view %}<small class="scan-owner">{{ scan.requester_email }}</small>{% endif %}</span></div>
+          <dl class="scan-row-meta" aria-label="Dados da análise"><div><dt>Perfil</dt><dd>{{ scan.profile_label }}</dd></div><div><dt>Início</dt><dd>{% if scan.started_at %}<time datetime="{{ scan.started_at }}" data-local-datetime="{{ scan.started_at }}" data-local-format="date">{{ scan.started_at }}</time>{% else %}—{% endif %}</dd></div><div><dt>Fim</dt><dd>{% if scan.finished_at %}<time datetime="{{ scan.finished_at }}" data-local-datetime="{{ scan.finished_at }}" data-local-format="date">{{ scan.finished_at }}</time>{% else %}{{ 'Em andamento' if scan.status == 'running' else '—' }}{% endif %}</dd></div><div><dt>Duração</dt><dd>{{ scan.duration_label }}</dd></div></dl>
+          <div class="scan-row-actions"><span class="status status-{{ scan.status }}">{{ {'queued':'na fila','running':'executando','succeeded':'concluída','failed':'falhou','canceled':'cancelada'}.get(scan.status, scan.status) }}</span>{% if scan.status == 'succeeded' %}<span class="scan-result scan-result-{{ scan.result_slug }}">{{ scan.result_label }}</span>{% endif %}{% if scan.status in ['failed','canceled'] %}<form method="post" action="{{ url_for('resume_scan', scan_id=scan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-primary button-small" type="submit">Retomar</button></form>{% endif %}{% if admin_view and scan.status in ['queued','running'] %}<form method="post" action="{{ url_for('cancel_scan', scan_id=scan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger button-small" type="submit">Parar</button></form>{% endif %}{% if not admin_view and scan.status in ['succeeded','failed','canceled'] %}<form method="post" action="{{ url_for('delete_scan', scan_id=scan.id) }}" data-delete-scan-form><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger button-small" type="submit" data-delete-scan data-scan-label="{{ scan.reference }} · {{ scan.target }}">Excluir</button></form>{% endif %}</div>
+        </div>
+        <div class="scan-inline-preview" id="scan-preview-{{ scan.id }}" hidden></div>
         </div>
       {% else %}<p class="empty">Nenhuma análise foi criada ainda.</p>{% endfor %}
       </div>
+      {% if admin_view and (has_prev or has_next) %}<nav class="scan-pagination" aria-label="Páginas do histórico">{% if has_prev %}<a class="button button-small" href="{{ url_for('user_scans', page=page-1, subject=selected_subject) }}">Anterior</a>{% endif %}<span>Página {{ page }}</span>{% if has_next %}<a class="button button-small" href="{{ url_for('user_scans', page=page+1, subject=selected_subject) }}">Próxima</a>{% endif %}</nav>{% endif %}
     </section>
+  {% endif %}
     {% if selected_scan %}
-    <section class="card detail report-card">
+    <section class="card detail report-card" id="scan-report"{% if not report_only and selected_scan.status in ['queued','running'] %} data-live-report="true"{% endif %}>
       <div class="report-heading">
-        <div><p class="eyebrow">Relatório da análise</p><h2>#{{ selected_scan.id }} · {{ selected_scan.target }}</h2><p class="muted">Leitura executiva com os detalhes técnicos disponíveis nesta execução.</p></div>
+        <div><p class="eyebrow">Relatório da análise</p><h2>{{ selected_scan.reference }} · {{ selected_scan.report_target }}</h2><p class="muted">Leitura executiva com os detalhes técnicos disponíveis nesta execução.</p></div>
         <span class="status status-{{ selected_scan.status }}">{{ {'queued':'na fila','running':'executando','succeeded':'concluída','failed':'falhou','canceled':'cancelada'}.get(selected_scan.status, selected_scan.status) }}</span>
       </div>
       {% if selected_scan.status in ['succeeded','failed','canceled'] %}
-      <div class="report-actions" aria-label="Ações do relatório"><button class="button" type="button" data-report-expand>Expandir todos</button><button class="button" type="button" data-report-collapse>Recolher todos</button><a class="button button-primary" href="{{ url_for('scan_report_pdf', scan_id=selected_scan.id) }}">Gerar PDF</a></div>
+      {% if selected_scan.status == 'succeeded' or report_only %}<div class="report-actions" aria-label="Ações do relatório">{% if selected_scan.status == 'succeeded' %}<a class="button button-primary" href="{{ url_for('scan_report_pdf', scan_id=selected_scan.id) }}">Gerar PDF</a>{% elif report_only %}<form method="post" action="{{ url_for('resume_scan', scan_id=selected_scan.id) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-primary" type="submit">Retomar scan</button></form>{% endif %}{% if can_delete_selected_scan and report_only %}<form method="post" action="{{ url_for('delete_scan', scan_id=selected_scan.id) }}" data-delete-scan-form><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit" data-delete-scan data-scan-label="{{ selected_scan.reference }} · {{ selected_scan.target }}">Excluir scan</button></form>{% endif %}</div>{% endif %}
       {% endif %}
-      <div class="report-meta" aria-label="Contexto da análise"><div class="report-meta-item"><span>Perfil</span><strong>{{ selected_scan.profile }}</strong></div><div class="report-meta-item"><span>Início</span><strong>{{ report_stats.started_label|default('Indisponível') }}</strong></div><div class="report-meta-item"><span>Fim</span><strong>{{ report_stats.finished_label|default('Indisponível') }}</strong></div><div class="report-meta-item"><span>Tempo total</span><strong>{{ report_stats.duration_label|default('Indisponível') }}</strong></div>{% if selected_scan.error_message %}<div class="report-meta-item report-meta-error"><span>Erro</span><strong>{{ selected_scan.error_message }}</strong></div>{% endif %}</div>
-      {% if selected_scan.status in ['queued','running'] %}<p class="muted">Esta página atualiza automaticamente enquanto o worker processa a análise.</p><form method="post" action="{{ url_for('cancel_scan', scan_id=selected_scan.id) }}" class="detail-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit">Cancelar análise</button></form>{% elif report_stats %}
+      {% if report_only %}<div class="report-meta" aria-label="Contexto da análise"><div class="report-meta-item"><span>Perfil</span><strong>{{ selected_scan.profile_label }}</strong></div><div class="report-meta-item"><span>Início</span><strong data-local-datetime="{{ selected_scan.started_at or '' }}" data-local-format="date">{{ selected_scan.started_at or '—' }}</strong></div><div class="report-meta-item"><span>Fim</span><strong data-local-datetime="{{ selected_scan.finished_at or '' }}" data-local-format="date">{{ selected_scan.finished_at or '—' }}</strong></div><div class="report-meta-item"><span>Duração</span><strong>{{ selected_scan.duration_label }}</strong></div></div>{% endif %}
+      {% if selected_scan.error_message %}<p class="report-note report-note-error"><strong>Erro:</strong> {{ selected_scan.error_message }}</p>{% endif %}
+      {% if selected_scan.status in ['queued','running'] %}
+      <div class="scan-live" data-scan-live data-status-url="{{ url_for('scan_status', scan_id=selected_scan.id) }}" data-report-url="{{ url_for('scan_report_only', scan_id=selected_scan.id) }}" data-initial-status="{{ selected_scan.status }}">
+      <div class="scan-live-heading"><div><p class="eyebrow">Execução em andamento</p><h3>Acompanhamento da análise</h3></div><div class="scan-live-heading-actions"><strong class="scan-progress-percent" data-progress-percent>{{ selected_scan.progress_percent }}%</strong><button class="button" type="button" data-execution-background>Continuar em segundo plano</button></div></div>
+        <div class="scan-progress-track" role="progressbar" aria-label="Progresso da análise" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ selected_scan.progress_percent }}"><span data-progress-bar style="width:{{ selected_scan.progress_percent }}%"></span></div>
+        <div class="scan-progress-meta"><span data-progress-count>{{ selected_scan.completed_checks }} de {{ selected_scan.total_checks or '—' }} consultas concluídas</span><span data-progress-eta>{{ selected_scan.eta_label }}</span><span data-progress-elapsed>Tempo decorrido: {{ selected_scan.elapsed_label }}</span></div>
+        <section class="scan-activity" aria-live="polite" aria-atomic="false"><div class="scan-activity-heading"><strong>Atividade recente</strong><span data-live-indicator>Atualizando</span></div><ol class="scan-event-list" data-scan-events>{% for event in scan_events %}<li><time data-local-datetime="{{ event.created_at }}" data-local-format="time" datetime="{{ event.created_at }}">{{ event.created_at }}</time><span>{{ event.message }}</span></li>{% else %}<li class="scan-event-empty" data-event-empty>Aguardando o início do worker.</li>{% endfor %}</ol></section>
+      </div>
+      <form method="post" action="{{ url_for('cancel_scan', scan_id=selected_scan.id) }}" class="detail-actions"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="button button-danger" type="submit">Cancelar análise</button></form>
+      {% elif report_stats %}
+      <section class="report-area report-overview" aria-label="Resumo da análise">
+      <div class="report-section-heading"><div><h3>Resumo da análise</h3><p class="muted">Alvo consultado, abrangência e conclusão da execução.</p></div></div>
       <div class="report-kpis" aria-label="Indicadores da análise">
         <div class="report-kpi"><span class="report-kpi-label">IPs verificados</span><strong>{{ report_stats.scanned_ips }}</strong><small>endereços IP únicos</small></div>
-        <div class="report-kpi report-kpi-info"><span class="report-kpi-label">Sub-redes /24</span><strong>{{ report_stats.subnets_24 }}</strong><small>blocos de referência</small></div>
+        <div class="report-kpi report-kpi-info"><span class="report-kpi-label">{{ report_stats.scope_label }}</span><strong class="report-scope-value">{{ report_stats.scope_value }}</strong><small>{{ report_stats.scope_detail }}</small></div>
         <div class="report-kpi report-kpi-warning"><span class="report-kpi-label">Blacklists consultadas</span><strong>{{ report_stats.consulted_blacklists }}</strong><small>fontes únicas</small></div>
         <div class="report-kpi report-kpi-success"><span class="report-kpi-label">Tempo total</span><strong>{{ report_stats.duration_label }}</strong><small>da abertura ao encerramento</small></div>
       </div>
-      <section class="report-summary-block"><div><p class="eyebrow">Resumo executivo</p><h3>Leitura rápida do resultado</h3><p class="muted">Foram verificados {{ report_stats.scanned_ips }} endereços IP em {{ report_stats.subnets_24 }} sub-redes /24, contra {{ report_stats.consulted_blacklists }} blacklists. A análise levou {{ report_stats.duration_label }} e identificou {{ report_stats.listed_ips }} {% if report_stats.listed_ips == 1 %}IP{% else %}IPs{% endif %} com detecção e {{ report_stats.clean_ips }} {% if report_stats.clean_ips == 1 %}IP limpo{% else %}IPs limpos{% endif %}.</p></div><span class="risk-label risk-label-{{ report_stats.risk_slug }}">{{ report_stats.risk_level }}</span></section>
-      {% if result_groups %}<section class="report-results"><div class="report-section-heading"><div><p class="eyebrow">Detalhamento técnico</p><h3>Resultados por bloco</h3><p class="muted">Cada IP aparece uma única vez. Vermelho indica detecção; verde indica consulta concluída sem detecção. Passe o mouse ou use o foco sobre a coluna para ver todas as blacklists consultadas.</p></div></div><div class="result-groups">{% for group in result_groups %}{% set group_index = loop.index %}<details class="result-group result-group-{{ 'listed' if group.has_findings else 'clean' }}" data-report-section><summary><span class="result-group-title"><strong>{{ group.block }}</strong><small>{{ group.ip_count }} {% if group.ip_count == 1 %}endereço IP{% else %}endereços IP{% endif %} · {{ group.detected_count }} com detecção · {{ group.all_blacklists_count }} blacklists consultadas</small></span><span class="result-group-count">{{ group.ip_count }} IPs</span></summary><div class="result-group-body">{% if group.network_findings %}<p class="report-note report-note-warning">Detecção em consulta de rede: {{ group.network_findings|join(', ') }}.</p>{% endif %}<div class="result-table-wrap"><table class="result-table"><thead><tr><th>Endereço IP</th><th>Blacklists consultadas</th><th>Resultado</th></tr></thead><tbody>{% for row in group.rows %}<tr><td><code>{{ row.ip }}</code></td><td><div class="blacklist-cell" tabindex="0" aria-describedby="blacklist-list-{{ group_index }}-{{ loop.index }}"><div class="blacklist-visible" aria-label="{{ row.detected_names|join(', ') if row.detected_names else row.state }}">{% for chip in row.visible_blacklists %}<span class="blacklist-chip blacklist-chip-{{ chip.tone }}" title="{{ chip.title }}">{{ chip.name }}</span>{% endfor %}</div><div class="blacklist-tooltip" id="blacklist-list-{{ group_index }}-{{ loop.index }}" role="tooltip"><strong>Lista completa · {{ row.consulted_count }} fontes</strong><div class="blacklist-tooltip-list">{% for blacklist in row.blacklists %}<span class="blacklist-chip blacklist-chip-{{ blacklist.tone }}" title="{{ blacklist.title }}">{{ blacklist.name }}</span>{% endfor %}</div></div></div></td><td><span class="result-status result-status-{{ 'listed' if row.has_detection else 'warning' if row.is_incomplete else 'clean' }}">{{ 'Detectado' if row.has_detection else 'Não concluído' if row.is_incomplete else 'Limpo' }}</span></td></tr>{% endfor %}</tbody></table></div></div></details>{% endfor %}</div></section>{% endif %}
+      <section class="report-summary-block"><div><h4>Conclusão da análise</h4><p class="muted">{{ report_stats.coverage_description }}, contra {{ report_stats.consulted_blacklists }} blacklists. A análise levou {{ report_stats.duration_label }} e identificou {{ report_stats.listed_ips }} IPs com detecção, {{ report_stats.clean_ips }} IPs limpos e {{ report_stats.incomplete_ips }} IPs inconclusivos.{% if report_stats.scanned_domains %} Também foi analisado {{ report_stats.scanned_domains }} domínio: {{ report_stats.listed_domains }} com detecção e {{ report_stats.incomplete_domains }} inconclusivos.{% endif %}{% if report_stats.risk_level == 'Inconclusivo' %} Não é possível afirmar que os alvos estão limpos.{% endif %}</p></div><span class="risk-label risk-label-{{ report_stats.risk_slug }}">{{ report_stats.risk_level }}</span></section>
+      </section>
+      {% include "_report_charts.html" %}
+      {% if report_stats.summary_only %}<p class="report-note">Este scan possui um volume elevado de consultas. Os blocos /24 são exibidos de forma consolidada; abra um bloco para carregar seus endereços IP.</p>{% endif %}
+      {% include "_report_results.html" %}
       {% if report_stats.timeouts or report_stats.errors %}<p class="report-note report-note-warning">{{ report_stats.timeouts }} timeouts e {{ report_stats.errors }} erros não representam detecção. Eles indicam consultas que não foram concluídas e reduzem a confiança do resultado.</p>{% endif %}
       {% else %}
-      <p class="muted">Esta análise ainda não possui um resultado final para exibir.</p>
+      <p class="muted">{% if selected_scan.status in ['failed','canceled'] %}Análise interrompida após {{ selected_scan.completed_checks }} de {{ selected_scan.total_checks }} consultas. Retome para consultar apenas os itens pendentes e concluir o relatório.{% else %}Esta análise ainda não possui um resultado final para exibir.{% endif %}</p>
       {% endif %}
     </section>
     {% endif %}
+    {% if not report_only and (health_user.profile or health_user.role) == 'super_admin' %}</div></div>{% endif %}
   </main>
+  {% if not report_only %}
+  <div class="execution-modal" data-execution-modal hidden>
+    <div class="execution-modal-backdrop" data-execution-background aria-hidden="true"></div>
+    <section class="execution-dialog" role="dialog" aria-modal="true" aria-labelledby="execution-dialog-title">
+      <div class="execution-dialog-heading"><div><p class="eyebrow">Execução em andamento</p><h2 id="execution-dialog-title" data-execution-title>Acompanhamento da análise</h2></div><button class="button" type="button" data-execution-background>Continuar em segundo plano</button></div>
+      <div class="execution-dialog-content" data-execution-content></div>
+    </section>
+  </div>
+  {% endif %}
+  <footer class="suite-footer">
+    <span>Desenvolvido por Guilherme Campos</span>
+    <a href="https://www.linkedin.com/in/guilherme-campos353/" target="_blank" rel="noopener noreferrer" aria-label="LinkedIn de Guilherme Campos" title="LinkedIn de Guilherme Campos">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5.2 3.5a2.1 2.1 0 1 1 0 4.2 2.1 2.1 0 0 1 0-4.2ZM3.5 9h3.4v11.5H3.5V9Zm5.5 0h3.3v1.6h.1c.5-.9 1.7-1.9 3.5-1.9 3.7 0 4.4 2.4 4.4 5.5v6.3h-3.5v-5.6c0-1.3 0-3-1.9-3s-2.1 1.5-2.1 2.9v5.7H9V9Z" /></svg>
+    </a>
+  </footer>
 </body>
 </html>

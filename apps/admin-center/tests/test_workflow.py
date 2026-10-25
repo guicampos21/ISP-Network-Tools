@@ -9,6 +9,9 @@ from .conftest import login_as
 
 
 def test_admin_pages_render_without_internal_errors(client, app):
+    with app.app_context():
+        User.query.filter_by(email="admin@example.test").one().role = "super_admin"
+        db.session.commit()
     login_as(client, app, "admin@example.test")
     paths = [
         "/",

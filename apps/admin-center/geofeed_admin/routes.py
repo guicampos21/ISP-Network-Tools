@@ -7,9 +7,12 @@ import ipaddress
 import json
 import re
 import secrets
+import unicodedata
 import zipfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlencode, urlparse
 from zoneinfo import ZoneInfo, available_timezones
 
@@ -27,12 +30,12 @@ from flask import (
     send_file,
     url_for,
 )
-from sqlalchemy import func, or_
+from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from werkzeug.security import generate_password_hash
 import requests
 
-from . import limiter, oauth
+from . import csrf, limiter, oauth
 from .avatar import (
     AVATAR_PRESETS,
     AVATAR_PRESET_CONFIGS,
@@ -58,21 +61,27 @@ from .models import (
     AuditLog,
     ChangeRequest,
     Company,
+    Customer,
     FeedEntry,
     Group,
-    GroupApplicationGrant,
     HealthCheck,
     InAppNotification,
+    IpamAllocation,
+    IpamApprovalRequest,
+    IpamEquipment,
     NetworkBlock,
     NotificationLog,
     Publication,
     PortalTheme,
+    PopDc,
+    PopAccessWindow,
     Role,
     Sector,
+    ServiceCatalogItem,
     SessionToken,
     JobFunction,
     User,
-    UserApplicationGrant,
+    customer_service_items,
     db,
     utcnow,
 )
@@ -84,7 +93,7 @@ from .operations import (
     run_healthchecks,
     run_publication_healthchecks,
 )
-from .security import audit, current_user, login_required, normalize_email, roles_required
+from .security import application_required, audit, current_user, login_required, normalize_email, permission_required, roles_required
 from .settings import get_setting, set_setting, setting_info
 from isp_shared.sso import issue_handoff
 
@@ -92,11 +101,797 @@ from isp_shared.sso import issue_handoff
 bp = Blueprint("panel", __name__)
 
 PERMISSION_OPTIONS = {
+    "app.admin_center.access": "Abrir o Admin Center",
+    "app.ipam_geofeed.access": "Abrir o IPAM/Geofeed",
+    "app.isp_network_health.access": "Abrir o ISP Network Health",
+    "dashboard.view": "Visualizar o Dashboard",
+    "audit.view": "Visualizar a Auditoria",
     "content.edit": "Editar empresas, blocos e entradas",
     "approvals.review": "Aprovar ou rejeitar alterações",
     "monitoring.run": "Executar monitoramento",
     "admin.access": "Acessar recursos administrativos",
+    "catalog.companies.view": "Visualizar cadastro de empresas",
+    "catalog.companies.manage": "Administrar cadastro de empresas",
+    "catalog.customers.view": "Visualizar cadastro de clientes",
+    "catalog.customers.manage": "Administrar cadastro de clientes",
+    "catalog.pops.view": "Visualizar cadastro de POPs/DCs",
+    "catalog.pops.manage": "Administrar cadastro de POPs/DCs",
+    "catalog.services.view": "Visualizar Catálogo de Serviços",
+    "catalog.services.manage": "Administrar Catálogo de Serviços",
+    "ipam.private.manage": "Administrar recursos IP privados",
+    "ipam.public.submit": "Enviar recursos IP públicos para aprovação",
+    "ipam.public.approve": "Aprovar recursos IP públicos",
+    "ipam.public.reject": "Rejeitar recursos IP públicos",
+    "ipam.equipment.manage": "Administrar equipamentos do IPAM",
+    "ipam.publish": "Publicar o Geofeed",
+    "health.view": "Visualizar análises de saúde",
+    "health.run": "Executar análises de saúde",
+    "health.report.export": "Exportar relatórios de saúde",
+    "users.manage": "Administrar usuários",
+    "profiles.manage": "Administrar perfis",
+    "groups.manage": "Administrar grupos",
+    "settings.manage": "Administrar configurações",
 }
+
+CUSTOMER_SERVICE_STATUSES = {
+    "suspended": "Suspenso",
+    "active": "Ativo",
+    "canceled": "Cancelado",
+}
+
+
+def _customer_service_statuses(customer: Customer | None) -> dict[int, str]:
+    if not customer or not customer.id:
+        return {}
+    rows = db.session.execute(
+        select(customer_service_items.c.service_id, customer_service_items.c.status).where(
+            customer_service_items.c.customer_id == customer.id
+        )
+    ).all()
+    return {
+        int(service_id): status if status in CUSTOMER_SERVICE_STATUSES else "active"
+        for service_id, status in rows
+    }
+
+
+def _apply_customer_service_statuses(customer: Customer, statuses: dict[int, str]) -> None:
+    db.session.flush()
+    for service_id, status in statuses.items():
+        db.session.execute(
+            customer_service_items.update()
+            .where(
+                customer_service_items.c.customer_id == customer.id,
+                customer_service_items.c.service_id == service_id,
+            )
+            .values(status=status)
+        )
+
+
+def _customer_requires_second_approach(customer: Customer | None) -> bool:
+    """Return whether an active customer service requires two access paths."""
+    if not customer or not customer.id:
+        return False
+    rows = db.session.execute(
+        select(ServiceCatalogItem.name, ServiceCatalogItem.active, customer_service_items.c.status)
+        .join(customer_service_items, customer_service_items.c.service_id == ServiceCatalogItem.id)
+        .where(customer_service_items.c.customer_id == customer.id)
+    ).all()
+    return any(
+        status == "active" and active and "segunda abordagem" in (name or "").casefold()
+        for name, active, status in rows
+    )
+
+IPAM_STATUSES = {
+    "available": "Disponível",
+    "allocated": "Alocado",
+    "reserved": "Reservado",
+    "blocked": "Bloqueado",
+    "decommissioned": "Desativado",
+}
+
+WEEKDAYS = (
+    ("mon", "Segunda-feira"),
+    ("tue", "Terça-feira"),
+    ("wed", "Quarta-feira"),
+    ("thu", "Quinta-feira"),
+    ("fri", "Sexta-feira"),
+    ("sat", "Sábado"),
+    ("sun", "Domingo"),
+)
+WEEKDAY_CODES = {code for code, _label in WEEKDAYS}
+BATTERY_MAX_MINUTES = 72 * 60
+
+IPAM_AUDIT_APPLICATIONS = {
+    "admin_center": "Admin Center",
+    "ipam_geofeed": "IPAM/Geofeed",
+    "geofeed_public": "Geofeed público",
+    "isp_network_health": "ISP Network Health",
+}
+
+
+def _ipam_text(value: str | None, limit: int = 255) -> str:
+    value = _clean(value, limit)
+    if any(ord(character) < 32 and character not in {"\t"} for character in value):
+        raise ValueError("O texto contém caracteres de controle inválidos.")
+    return value
+
+
+def _ipam_coordinate(value: str | None, label: str, minimum: float, maximum: float) -> Decimal | None:
+    raw = _clean(value, 32)
+    if not raw:
+        return None
+    try:
+        number = Decimal(raw)
+    except InvalidOperation as exc:
+        raise ValueError(f"{label} inválida.") from exc
+    if not number.is_finite() or number < Decimal(str(minimum)) or number > Decimal(str(maximum)):
+        raise ValueError(f"{label} inválida.")
+    return number.quantize(Decimal("0.0000001"))
+
+
+def _cnpj(value: str | None) -> str:
+    """Normalize and validate a Brazilian CNPJ without accepting placeholders."""
+    digits = re.sub(r"\D", "", value or "")
+    if len(digits) != 14 or len(set(digits)) == 1:
+        raise ValueError("Informe um CNPJ válido com 14 dígitos.")
+    for length, weights in ((12, (5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2)), (13, (6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2))):
+        total = sum(int(digits[index]) * weight for index, weight in enumerate(weights))
+        digit = 0 if total % 11 < 2 else 11 - (total % 11)
+        if int(digits[length]) != digit:
+            raise ValueError("Informe um CNPJ válido.")
+    return f"{digits[:2]}.{digits[2:5]}.{digits[5:8]}/{digits[8:12]}-{digits[12:]}"
+
+
+def _format_time(value: time | None) -> str:
+    return value.strftime("%H:%M") if value else ""
+
+
+def battery_autonomy_label(minutes: int | None) -> str:
+    if minutes is None:
+        return "Não informado"
+    if minutes == 0:
+        return "Não possui autonomia"
+    if minutes == -1:
+        return "Superior a 72 horas"
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def access_window_label(window: PopAccessWindow) -> str:
+    days = [label[:3] for code, label in WEEKDAYS if code in (window.weekdays or "").split(",")]
+    end_suffix = " (+1 dia)" if window.end_time <= window.start_time else ""
+    return f"{', '.join(days)} · {_format_time(window.start_time)}–{_format_time(window.end_time)}{end_suffix}"
+
+
+def _parse_time(value: str | None, label: str) -> time:
+    try:
+        return datetime.strptime(_clean(value, 5), "%H:%M").time()
+    except ValueError as exc:
+        raise ValueError(f"Informe um horário válido para {label}.") from exc
+
+
+def _parse_access_windows() -> tuple[bool, list[dict]]:
+    always_open = request.form.get("access_24h") == "on"
+    if always_open:
+        return True, []
+    try:
+        count = max(0, min(int(request.form.get("window_count", "0") or 0), 32))
+    except ValueError as exc:
+        raise ValueError("Quantidade de janelas de acesso inválida.") from exc
+    windows: list[dict] = []
+    segments: list[tuple[int, int, int]] = []
+    weekday_index = {code: index for index, (code, _label) in enumerate(WEEKDAYS)}
+    for index in range(count):
+        days = [code for code in request.form.getlist(f"window_{index}_days") if code in WEEKDAY_CODES]
+        if not days:
+            raise ValueError(f"Selecione ao menos um dia na janela {index + 1}.")
+        start = _parse_time(request.form.get(f"window_{index}_start"), "início")
+        end = _parse_time(request.form.get(f"window_{index}_end"), "término")
+        if start == end:
+            raise ValueError("O horário inicial e final não podem ser iguais; use 24h para acesso contínuo.")
+        start_minutes = start.hour * 60 + start.minute
+        end_minutes = end.hour * 60 + end.minute
+        for day in days:
+            day_index = weekday_index[day]
+            duration_end = end_minutes if end_minutes > start_minutes else end_minutes + 1440
+            segments.append((day_index, start_minutes, duration_end))
+            if duration_end > 1440:
+                segments.append(((day_index + 1) % 7, 0, duration_end - 1440))
+        windows.append({"weekdays": ",".join(days), "start_time": start, "end_time": end})
+    for current_index, (day, start, end) in enumerate(segments):
+        for other_day, other_start, other_end in segments[current_index + 1:]:
+            if day == other_day and max(start, other_start) < min(end, other_end):
+                raise ValueError("As janelas de acesso do POP/DC não podem se sobrepor.")
+    return False, windows
+
+
+def _ipam_prefix(value: str | None, resource_kind: str) -> str:
+    raw = _ipam_text(value, 64)
+    try:
+        if resource_kind == "ip":
+            return str(ipaddress.ip_address(raw))
+        canonical = ipaddress.ip_network(raw, strict=False)
+        if str(canonical) != raw:
+            raise ValueError(
+                f"O prefixo {raw} não inicia no limite da sub-rede /{canonical.prefixlen}. "
+                f"Use {canonical}."
+            )
+        return str(canonical)
+    except ValueError as exc:
+        if str(exc).startswith("O prefixo "):
+            raise
+        label = "endereço IP" if resource_kind == "ip" else "bloco CIDR"
+        raise ValueError(f"Informe um {label} válido e alinhado.") from exc
+
+
+def _ipam_network(prefix: str, resource_kind: str) -> ipaddress._BaseNetwork:
+    if resource_kind == "ip":
+        address = ipaddress.ip_address(prefix)
+        return ipaddress.ip_network(f"{prefix}/{address.max_prefixlen}", strict=True)
+    return ipaddress.ip_network(prefix, strict=True)
+
+
+def _ipam_effective_statuses() -> dict[int, str]:
+    """Return display statuses for parents whose descendants are in use.
+
+    The stored status remains the source of truth for editing and filtering.
+    This extra status is only a read-time indication that a parent contains
+    allocated descendants or published child prefixes.
+    """
+    allocations = IpamAllocation.query.filter(IpamAllocation.status != "decommissioned").all()
+    networks: list[tuple[IpamAllocation, ipaddress._BaseNetwork]] = []
+    for allocation in allocations:
+        try:
+            networks.append((allocation, _ipam_network(allocation.prefix, allocation.resource_kind)))
+        except ValueError:
+            continue
+
+    published_networks: list[ipaddress._BaseNetwork] = []
+    snapshot = latest_published_snapshot() or {}
+    for block in snapshot.get("blocks", []):
+        if not block.get("active"):
+            continue
+        for entry in block.get("entries", []):
+            try:
+                published_networks.append(ipaddress.ip_network(str(entry.get("prefix", "")), strict=True))
+            except (TypeError, ValueError):
+                continue
+
+    statuses: dict[int, str] = {}
+    for allocation, network in networks:
+        has_allocated_child = any(
+            candidate.id != allocation.id
+            and candidate.scope == allocation.scope
+            and candidate.approval_status == "approved"
+            and candidate.status == "allocated"
+            and candidate_network.version == network.version
+            and candidate_network != network
+            and candidate_network.subnet_of(network)
+            for candidate, candidate_network in networks
+        )
+        has_published_child = any(
+            candidate.version == network.version
+            and candidate != network
+            and candidate.subnet_of(network)
+            for candidate in published_networks
+        )
+        statuses[allocation.id] = "in_use" if has_allocated_child or has_published_child else allocation.status
+    return statuses
+
+
+def _classify_ipam_network(network: ipaddress._BaseNetwork) -> str:
+    """Classify a network from its address properties, without user input."""
+    special_networks = (
+        ipaddress.ip_network("192.0.2.0/24"),
+        ipaddress.ip_network("198.51.100.0/24"),
+        ipaddress.ip_network("203.0.113.0/24"),
+        ipaddress.ip_network("2001:db8::/32"),
+    )
+    if any(network.version == item.version and network.subnet_of(item) for item in special_networks):
+        return "special"
+    first = network.network_address
+    if any((first.is_loopback, first.is_link_local, first.is_multicast, first.is_reserved, first.is_unspecified)):
+        return "special"
+    if network.is_private:
+        return "private"
+    if network.is_global:
+        return "public"
+    return "special"
+
+
+def _ipam_check_overlap(values: dict, allocation_id: int | None = None) -> None:
+    candidate = _ipam_network(values["prefix"], values["resource_kind"])
+    for existing in IpamAllocation.query.filter_by(scope=values["scope"]).all():
+        if allocation_id is not None and existing.id == allocation_id:
+            continue
+        try:
+            existing_network = _ipam_network(existing.prefix, existing.resource_kind)
+        except ValueError:
+            continue
+        if candidate.version == existing_network.version and candidate.overlaps(existing_network):
+            is_hierarchical_allocation = bool(values.get("parent_id")) and candidate != existing_network and (
+                candidate.subnet_of(existing_network) or existing_network.subnet_of(candidate)
+            )
+            if is_hierarchical_allocation:
+                continue
+            raise ValueError(
+                f"O recurso se sobrepõe à alocação existente {existing.prefix} na classificação {values['scope']}."
+            )
+
+
+def _company_values(company: Company | None = None) -> dict:
+    latitude = _ipam_coordinate(request.form.get("latitude"), "Latitude", -90, 90)
+    longitude = _ipam_coordinate(request.form.get("longitude"), "Longitude", -180, 180)
+    if (latitude is None) != (longitude is None):
+        raise ValueError("Informe latitude e longitude juntas.")
+    values = {
+        "name": _ipam_text(request.form.get("name"), 120),
+        "cnpj": _cnpj(request.form.get("cnpj")),
+        "address": _ipam_text(request.form.get("address"), 255),
+        "latitude": latitude,
+        "longitude": longitude,
+        "default_asn": _integer(request.form.get("default_asn"), "ASN"),
+        "contact_email": _email(request.form.get("contact_email", ""), required=False),
+        "contact_phone": _ipam_text(request.form.get("contact_phone"), 64),
+        "active": request.form.get("active") == "on",
+    }
+    if not values["name"]:
+        raise ValueError("A razão social é obrigatória.")
+    duplicate = Company.query.filter(Company.cnpj == values["cnpj"])
+    if company:
+        duplicate = duplicate.filter(Company.id != company.id)
+        for key, value in values.items():
+            setattr(company, key, value)
+    if duplicate.first():
+        raise ValueError("Já existe uma empresa com este CNPJ.")
+    return values
+
+
+def _customer_values(customer: Customer | None = None) -> dict:
+    cnpj = _cnpj(request.form.get("cnpj"))
+    selected_ids: set[int] = set()
+    for raw_id in request.form.getlist("service_ids"):
+        try:
+            selected_ids.add(int(raw_id))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Serviço selecionado inválido.") from exc
+    active_services = ServiceCatalogItem.query.filter(
+        ServiceCatalogItem.id.in_(selected_ids), ServiceCatalogItem.active.is_(True)
+    ).all() if selected_ids else []
+    existing_ids = {service.id for service in customer.services} if customer else set()
+    if len(active_services) != len(selected_ids):
+        inactive_existing = selected_ids - {service.id for service in active_services}
+        if not inactive_existing.issubset(existing_ids):
+            raise ValueError("Selecione somente serviços ativos do catálogo.")
+        services = ServiceCatalogItem.query.filter(ServiceCatalogItem.id.in_(selected_ids)).all()
+    else:
+        services = active_services
+    service_statuses = {}
+    for service in services:
+        status = request.form.get(f"service_status_{service.id}", "active")
+        if status not in CUSTOMER_SERVICE_STATUSES:
+            raise ValueError("Status de serviço contratado inválido.")
+        service_statuses[service.id] = status
+    latitude = _ipam_coordinate(request.form.get("latitude"), "Latitude", -90, 90)
+    longitude = _ipam_coordinate(request.form.get("longitude"), "Longitude", -180, 180)
+    if (latitude is None) != (longitude is None):
+        raise ValueError("Informe latitude e longitude juntas.")
+    values = {
+        "name": _ipam_text(request.form.get("name"), 160),
+        "cnpj": cnpj,
+        "address": _ipam_text(request.form.get("address"), 255),
+        "city": _ipam_text(request.form.get("city"), 120),
+        "state": _ipam_text(request.form.get("state"), 80),
+        "postal_code": _ipam_text(request.form.get("postal_code"), 32),
+        "latitude": latitude,
+        "longitude": longitude,
+        "contact_name": _ipam_text(request.form.get("contact_name"), 160),
+        "contact_email": _email(request.form.get("contact_email", ""), required=False),
+        "contact_phone": _ipam_text(request.form.get("contact_phone"), 64),
+        "notes": _ipam_text(request.form.get("notes"), 4000),
+        "active": request.form.get("active") == "on",
+    }
+    if not values["name"]:
+        raise ValueError("A razão social é obrigatória.")
+    duplicate = Customer.query.filter(Customer.cnpj == cnpj)
+    if customer:
+        duplicate = duplicate.filter(Customer.id != customer.id)
+        for key, value in values.items():
+            setattr(customer, key, value)
+        customer.document = cnpj
+        customer.services = services
+    if duplicate.first():
+        raise ValueError("Já existe um cliente com este CNPJ.")
+    values["document"] = cnpj
+    values["services"] = services
+    values["service_statuses"] = service_statuses
+    return values
+
+
+def _pop_dc_values(pop: PopDc | None = None) -> dict:
+    always_open, access_windows = _parse_access_windows()
+    battery_raw = _clean(request.form.get("battery_autonomy_minutes"), 8)
+    try:
+        battery_minutes = int(battery_raw or "0")
+    except ValueError as exc:
+        raise ValueError("Autonomia de baterias/UPS inválida.") from exc
+    if battery_minutes not in {0, -1} and (battery_minutes < 30 or battery_minutes > BATTERY_MAX_MINUTES or battery_minutes % 30):
+        raise ValueError("Selecione uma autonomia em intervalos de 30 minutos até 72 horas.")
+    primary_edge_router_id = _clean(request.form.get("primary_edge_router_id"), 16) or None
+    primary_edge_router = db.session.get(IpamEquipment, int(primary_edge_router_id)) if primary_edge_router_id else None
+    if primary_edge_router and (
+        not primary_edge_router.active
+        or primary_edge_router.equipment_type != "edge_router"
+        or (pop and primary_edge_router.pop_id not in {None, pop.id})
+    ):
+        raise ValueError("Selecione um roteador de borda ativo e pertencente a este POP/DC.")
+    values = {
+        "name": _ipam_text(request.form.get("name"), 160),
+        "code": _ipam_text(request.form.get("code"), 64).upper(),
+        "address": _ipam_text(request.form.get("address"), 255),
+        "city": _ipam_text(request.form.get("city"), 120),
+        "state": _ipam_text(request.form.get("state"), 80),
+        "postal_code": _ipam_text(request.form.get("postal_code"), 32),
+        "latitude": _ipam_coordinate(request.form.get("latitude"), "Latitude", -90, 90),
+        "longitude": _ipam_coordinate(request.form.get("longitude"), "Longitude", -180, 180),
+        "contact_name": _ipam_text(request.form.get("contact_name"), 160),
+        "contact_email": _email(request.form.get("contact_email", ""), required=False),
+        "contact_phone": _ipam_text(request.form.get("contact_phone"), 64),
+        "access_hours": "",
+        "battery_autonomy": battery_autonomy_label(battery_minutes),
+        "access_24h": always_open,
+        "battery_autonomy_minutes": battery_minutes,
+        "primary_edge_router_id": primary_edge_router.id if primary_edge_router else None,
+        "access_windows": access_windows,
+        "notes": _ipam_text(request.form.get("notes"), 4000),
+        "active": request.form.get("active") == "on",
+    }
+    if not values["name"] or not values["code"]:
+        raise ValueError("Nome e código do POP/DC são obrigatórios.")
+    if (values["latitude"] is None) != (values["longitude"] is None):
+        raise ValueError("Informe latitude e longitude juntas.")
+    if pop:
+        for key, value in values.items():
+            if key != "access_windows":
+                setattr(pop, key, value)
+        pop.access_windows.clear()
+        pop.access_windows.extend(PopAccessWindow(**window) for window in access_windows)
+    return values
+
+
+IPAM_INHERITED_FIELDS = (
+    "company_id", "geofeed_region", "vlan", "vrf", "customer_id",
+    "pop_id", "pop_2_id", "access_type", "access_type_2", "router_id",
+    "router_2_id", "switch_id", "switch_2_id", "cpe_id", "access_point_id",
+    "access_point_2_id", "st_id", "st_2_id",
+)
+IPAM_PUBLIC_INHERITED_FIELDS = {"company_id", "geofeed_region"}
+IPAM_EFFECTIVE_FIELDS = IPAM_INHERITED_FIELDS + (
+    "allocation_address", "latitude", "longitude",
+)
+
+
+def _ipam_geofeed_region(source_block: NetworkBlock | None, network: ipaddress._BaseNetwork) -> str:
+    """Return the most specific state/region found in the current Geofeed."""
+    if not source_block:
+        return ""
+    best = None
+    best_prefixlen = -1
+    for entry in source_block.entries:
+        try:
+            entry_network = ipaddress.ip_network(entry.prefix, strict=True)
+        except ValueError:
+            continue
+        if entry_network.version == network.version and network.subnet_of(entry_network):
+            if entry_network.prefixlen > best_prefixlen and entry.region:
+                best = entry.region
+                best_prefixlen = entry_network.prefixlen
+    return best or ""
+
+
+def _ipam_effective_operational_values(allocation: IpamAllocation | None) -> tuple[dict, dict]:
+    values = {}
+    sources = {}
+    current = allocation
+    visited = set()
+    while current and current.id not in visited:
+        visited.add(current.id)
+        for field in IPAM_EFFECTIVE_FIELDS:
+            if field in {"allocation_address", "latitude", "longitude"} and current is not allocation:
+                continue
+            value = getattr(current, field, None)
+            if field not in values and value not in {None, ""}:
+                values[field] = value
+                sources[field] = current.prefix
+        current = current.parent
+    return values, sources
+
+
+def _ipam_child_inherited_values(
+    parent: IpamAllocation | None, target_scope: str | None
+) -> tuple[dict, dict]:
+    """Return the values a child may inherit for its calculated scope."""
+    values, sources = _ipam_effective_operational_values(parent)
+    if target_scope == "public":
+        values = {field: value for field, value in values.items() if field in IPAM_PUBLIC_INHERITED_FIELDS}
+        sources = {field: source for field, source in sources.items() if field in IPAM_PUBLIC_INHERITED_FIELDS}
+    return values, sources
+
+
+def _ipam_allocation_values() -> dict:
+    resource_kind = _ipam_text(request.form.get("resource_kind"), 16).lower()
+    if resource_kind not in {"block", "ip"}:
+        raise ValueError("Tipo de recurso IPAM inválido.")
+    status = _ipam_text(request.form.get("status"), 24).lower()
+    if status not in IPAM_STATUSES:
+        raise ValueError("Status do recurso IPAM inválido.")
+    source_block_id = request.form.get("source_block_id", "").strip()
+    company_id = request.form.get("company_id", "").strip()
+    parent_id = request.form.get("parent_id", "").strip()
+    customer_id = request.form.get("customer_id", "").strip()
+    pop_id = request.form.get("pop_id", "").strip()
+    pop_2_id = request.form.get("pop_2_id", "").strip()
+    access_type = _ipam_text(request.form.get("access_type"), 16).lower() or "fiber"
+    access_type_2 = _ipam_text(request.form.get("access_type_2"), 16).lower() or "fiber"
+    router_id = request.form.get("router_id", "").strip()
+    router_2_id = request.form.get("router_2_id", "").strip()
+    switch_id = request.form.get("switch_id", "").strip()
+    switch_2_id = request.form.get("switch_2_id", "").strip()
+    cpe_id = request.form.get("cpe_id", "").strip()
+    access_point_id = request.form.get("access_point_id", "").strip()
+    access_point_2_id = request.form.get("access_point_2_id", "").strip()
+    st_id = request.form.get("st_id", "").strip()
+    st_2_id = request.form.get("st_2_id", "").strip()
+    source_block = db.session.get(NetworkBlock, int(source_block_id)) if source_block_id else None
+    company = db.session.get(Company, int(company_id)) if company_id else None
+    parent = db.session.get(IpamAllocation, int(parent_id)) if parent_id else None
+    customer = db.session.get(Customer, int(customer_id)) if customer_id else None
+    pop = db.session.get(PopDc, int(pop_id)) if pop_id else None
+    pop_2 = db.session.get(PopDc, int(pop_2_id)) if pop_2_id else None
+    router = db.session.get(IpamEquipment, int(router_id)) if router_id else None
+    router_2 = db.session.get(IpamEquipment, int(router_2_id)) if router_2_id else None
+    switch = db.session.get(IpamEquipment, int(switch_id)) if switch_id else None
+    switch_2 = db.session.get(IpamEquipment, int(switch_2_id)) if switch_2_id else None
+    cpe = db.session.get(IpamEquipment, int(cpe_id)) if cpe_id else None
+    access_point = db.session.get(IpamEquipment, int(access_point_id)) if access_point_id else None
+    access_point_2 = db.session.get(IpamEquipment, int(access_point_2_id)) if access_point_2_id else None
+    st = db.session.get(IpamEquipment, int(st_id)) if st_id else None
+    st_2 = db.session.get(IpamEquipment, int(st_2_id)) if st_2_id else None
+    if source_block_id and not source_block:
+        raise ValueError("Bloco Geofeed de referência inválido.")
+    if company_id and (not company or not company.active):
+        raise ValueError("Empresa inválida.")
+    if parent_id and (not parent or parent.resource_kind != "block" or parent.status == "decommissioned"):
+        raise ValueError("Bloco pai inválido.")
+    prefix = _ipam_prefix(request.form.get("prefix"), resource_kind)
+    resource_network = _ipam_network(prefix, resource_kind)
+    scope = _classify_ipam_network(resource_network)
+    inherited, _inherited_sources = _ipam_child_inherited_values(parent, scope)
+    customer_id = str(inherited.get("customer_id") or customer_id)
+    pop_id = str(inherited.get("pop_id") or pop_id)
+    pop_2_id = str(inherited.get("pop_2_id") or pop_2_id)
+    access_type = str(inherited.get("access_type") or access_type)
+    access_type_2 = str(inherited.get("access_type_2") or access_type_2)
+    router_id = str(inherited.get("router_id") or router_id)
+    router_2_id = str(inherited.get("router_2_id") or router_2_id)
+    switch_id = str(inherited.get("switch_id") or switch_id)
+    switch_2_id = str(inherited.get("switch_2_id") or switch_2_id)
+    cpe_id = str(inherited.get("cpe_id") or cpe_id)
+    access_point_id = str(inherited.get("access_point_id") or access_point_id)
+    access_point_2_id = str(inherited.get("access_point_2_id") or access_point_2_id)
+    st_id = str(inherited.get("st_id") or st_id)
+    st_2_id = str(inherited.get("st_2_id") or st_2_id)
+    customer = db.session.get(Customer, int(customer_id)) if customer_id else None
+    pop = db.session.get(PopDc, int(pop_id)) if pop_id else None
+    pop_2 = db.session.get(PopDc, int(pop_2_id)) if pop_2_id else None
+    router = db.session.get(IpamEquipment, int(router_id)) if router_id else None
+    router_2 = db.session.get(IpamEquipment, int(router_2_id)) if router_2_id else None
+    switch = db.session.get(IpamEquipment, int(switch_id)) if switch_id else None
+    switch_2 = db.session.get(IpamEquipment, int(switch_2_id)) if switch_2_id else None
+    cpe = db.session.get(IpamEquipment, int(cpe_id)) if cpe_id else None
+    access_point = db.session.get(IpamEquipment, int(access_point_id)) if access_point_id else None
+    access_point_2 = db.session.get(IpamEquipment, int(access_point_2_id)) if access_point_2_id else None
+    st = db.session.get(IpamEquipment, int(st_id)) if st_id else None
+    st_2 = db.session.get(IpamEquipment, int(st_2_id)) if st_2_id else None
+    if customer_id and not customer:
+        raise ValueError("Cliente inválido.")
+    if customer and not customer.active:
+        raise ValueError("O cliente selecionado está inativo.")
+    if pop_id and not pop:
+        raise ValueError("POP/DC inválido.")
+    if pop_2_id and not pop_2:
+        raise ValueError("Segundo POP/DC inválido.")
+    if pop and pop_2 and pop.id == pop_2.id:
+        raise ValueError("A segunda abordagem deve usar um POP/DC diferente do primeiro.")
+    if access_type not in {"fiber", "radio"} or access_type_2 not in {"fiber", "radio"}:
+        raise ValueError("Tipo de abordagem inválido.")
+
+    def validate_equipment(item, raw_id, types, label, expected_pop=None, expected_customer=None):
+        if not raw_id:
+            return
+        if not item or not item.active or item.equipment_type not in types:
+            raise ValueError(f"{label} inválido.")
+        if expected_pop and item.pop_id not in {None, expected_pop.id}:
+            raise ValueError(f"{label} não pertence ao POP/DC selecionado.")
+        if expected_customer and item.customer_id not in {None, expected_customer.id}:
+            raise ValueError(f"{label} não pertence ao cliente selecionado.")
+
+    validate_equipment(router, router_id, {"router"}, "Roteador POP", pop)
+    validate_equipment(router_2, router_2_id, {"router"}, "Segundo roteador POP", pop_2)
+    validate_equipment(switch, switch_id, {"switch"}, "Switch POP", pop)
+    validate_equipment(switch_2, switch_2_id, {"switch"}, "Segundo switch POP", pop_2)
+    validate_equipment(cpe, cpe_id, {"cpe"}, "CPE", expected_customer=customer)
+    validate_equipment(access_point, access_point_id, {"radio_ap"}, "Rádio AP", pop, customer)
+    validate_equipment(access_point_2, access_point_2_id, {"radio_ap"}, "Segundo rádio AP", pop_2, customer)
+    validate_equipment(st, st_id, {"radio_st"}, "Rádio cliente (ST)", pop, customer)
+    validate_equipment(st_2, st_2_id, {"radio_st"}, "Segundo rádio cliente (ST)", pop_2, customer)
+
+    if pop and not router:
+        raise ValueError("Selecione o Roteador POP da primeira abordagem.")
+    if pop_2 and not router_2:
+        raise ValueError("Selecione o Roteador POP da segunda abordagem.")
+    requires_second = _customer_requires_second_approach(customer)
+    if requires_second and not customer:
+        raise ValueError("Selecione o cliente para um serviço de Segunda abordagem.")
+    if requires_second and not pop:
+        raise ValueError("Clientes com serviço de Segunda abordagem precisam da primeira abordagem.")
+    if requires_second and not pop_2:
+        raise ValueError("O serviço ativo de Segunda abordagem exige um segundo POP/DC.")
+    if requires_second and not router_2:
+        raise ValueError("O serviço ativo de Segunda abordagem exige o segundo Roteador POP.")
+    if requires_second and not cpe:
+        raise ValueError("O serviço ativo de Segunda abordagem exige uma CPE vinculada ao cliente.")
+    if (pop_2 or requires_second) and not customer:
+        raise ValueError("Selecione o cliente antes de cadastrar a segunda abordagem.")
+    if cpe and customer and cpe.customer_id not in {None, customer.id}:
+        raise ValueError("A CPE selecionada pertence a outro cliente.")
+    if cpe and cpe.router_id and router and cpe.router_id not in {router.id, router_2.id if router_2 else None}:
+        raise ValueError("A CPE não está vinculada ao Roteador POP selecionado.")
+    if cpe and cpe.secondary_router_id and router_2 and cpe.secondary_router_id != router_2.id:
+        raise ValueError("A segunda abordagem da CPE não corresponde ao segundo Roteador POP.")
+
+    for access_label, access_kind, ap, radio_st in (
+        ("primeira", access_type, access_point, st),
+        ("segunda", access_type_2, access_point_2, st_2),
+    ):
+        if access_kind == "radio" and (not ap or not radio_st):
+            raise ValueError(f"A abordagem {access_label} via rádio exige um AP e um rádio cliente (ST).")
+        if access_kind == "fiber" and (ap or radio_st):
+            raise ValueError(f"A abordagem {access_label} via fibra não pode ter AP ou rádio cliente.")
+        if radio_st and (not cpe or radio_st.cpe_id not in {None, cpe.id}):
+            raise ValueError(f"O rádio cliente da abordagem {access_label} deve estar associado à CPE do cliente.")
+        if radio_st and ap and radio_st.access_point_id not in {None, ap.id}:
+            raise ValueError(f"O rádio cliente da abordagem {access_label} deve usar o AP selecionado.")
+    if scope != "public" and source_block:
+        raise ValueError("Somente recursos públicos podem apontar para um bloco publicado no Geofeed.")
+    if parent:
+        parent_network = _ipam_network(parent.prefix, parent.resource_kind)
+        if resource_network.version != parent_network.version or resource_network == parent_network or not resource_network.subnet_of(parent_network):
+            raise ValueError("O recurso deve pertencer ao bloco pai selecionado.")
+        if parent.scope != scope:
+            raise ValueError("A classificação do recurso deve ser compatível com a do bloco pai.")
+        if company and parent.company_id and company.id != parent.company_id:
+            raise ValueError("O recurso derivado deve usar a mesma empresa do bloco pai.")
+        company = parent.company
+        minimum_parent_prefix = 24 if resource_network.version == 4 else 32
+        if resource_network.prefixlen > minimum_parent_prefix and parent_network.prefixlen < minimum_parent_prefix:
+            unit = "/24" if resource_network.version == 4 else "/32"
+            raise ValueError(
+                f"Um recurso IPv{resource_network.version} menor que {unit} deve ter como pai "
+                f"um {unit} ou uma sub-rede menor. O pai selecionado {parent.prefix} é amplo demais."
+            )
+    requires_parent = resource_kind == "ip" or (resource_network.version == 4 and resource_network.prefixlen > 24) or (resource_network.version == 6 and resource_network.prefixlen > 32)
+    if requires_parent and not parent:
+        raise ValueError("Este recurso precisa de um bloco pai. Cadastre-o primeiro ou use o botão de cadastro rápido.")
+    if not parent and (not company or not company.active):
+        raise ValueError("Selecione a empresa proprietária do bloco raiz.")
+    latitude = _ipam_coordinate(request.form.get("latitude"), "Latitude", -90, 90)
+    longitude = _ipam_coordinate(request.form.get("longitude"), "Longitude", -180, 180)
+    if (latitude is None) != (longitude is None):
+        raise ValueError("Informe latitude e longitude juntas.")
+    return {
+        "resource_kind": resource_kind,
+        "prefix": prefix,
+        "scope": scope,
+        "status": status,
+        "parent_prefix": parent.prefix if parent else "",
+        "parent_id": parent.id if parent else None,
+        "company_id": company.id if company else None,
+        "geofeed_region": inherited.get("geofeed_region") or _ipam_geofeed_region(source_block, resource_network),
+        "allocation_address": _ipam_text(request.form.get("allocation_address"), 255),
+        "latitude": latitude,
+        "longitude": longitude,
+        "vlan": inherited.get("vlan") or _ipam_text(request.form.get("vlan"), 64),
+        "vrf": inherited.get("vrf") or _ipam_text(request.form.get("vrf"), 80),
+        "description": _ipam_text(request.form.get("description"), 255),
+        "notes": _ipam_text(request.form.get("notes"), 4000),
+        "source_block_id": source_block.id if source_block else None,
+        "customer_id": customer.id if customer else None,
+        "pop_id": pop.id if pop else None,
+        "router_id": router.id if router else None,
+        "cpe_id": cpe.id if cpe else None,
+        "access_type": access_type,
+        "access_type_2": access_type_2,
+        "pop_2_id": pop_2.id if pop_2 else None,
+        "router_2_id": router_2.id if router_2 else None,
+        "switch_id": switch.id if switch else None,
+        "switch_2_id": switch_2.id if switch_2 else None,
+        "access_point_id": access_point.id if access_point else None,
+        "access_point_2_id": access_point_2.id if access_point_2 else None,
+        "st_id": st.id if st else None,
+        "st_2_id": st_2.id if st_2 else None,
+    }
+
+
+def _ipam_apply_values(allocation: IpamAllocation, values: dict) -> None:
+    for key, value in values.items():
+        setattr(allocation, key, value)
+
+
+def _ipam_approval_snapshot(values: dict) -> dict:
+    """Convert validated form values to a JSON-safe review snapshot."""
+    snapshot = dict(values)
+    for key in ("latitude", "longitude"):
+        if snapshot.get(key) is not None:
+            snapshot[key] = str(snapshot[key])
+    return snapshot
+
+
+def _pending_ipam_approval(allocation: IpamAllocation) -> IpamApprovalRequest | None:
+    return IpamApprovalRequest.query.filter_by(
+        allocation_id=allocation.id, status="pending"
+    ).order_by(IpamApprovalRequest.created_at.desc()).first()
+
+
+def _submit_ipam_approval(
+    allocation: IpamAllocation,
+    values: dict,
+    operation: str,
+    notes: str,
+) -> IpamApprovalRequest:
+    if _pending_ipam_approval(allocation):
+        raise ValueError("Este recurso já possui uma solicitação de aprovação pendente.")
+    if not notes:
+        raise ValueError("Informe uma observação para o administrador.")
+    allocation.approval_status = "pending"
+    change = IpamApprovalRequest(
+        allocation=allocation,
+        operation=operation,
+        status="pending",
+        title=f"IPAM: {operation} {allocation.prefix}",
+        snapshot_json=canonical_json(_ipam_approval_snapshot(values)),
+        notes=notes,
+        requested_by_id=current_user().id,
+    )
+    db.session.add(change)
+    db.session.flush()
+    admins = User.query.filter(User.active.is_(True)).all()
+    admins = [user for user in admins if user.id != current_user().id and user.has_permission("ipam.public.approve")]
+    create_in_app_notifications(
+        admins,
+        f"Aprovação IPAM pendente #{change.id}",
+        f"{current_user().email} enviou: {change.title}",
+        url_for("panel.ipam_approval_detail", approval_id=change.id),
+    )
+    send_notification(
+        [user.email for user in admins],
+        f"[ISP Network Tools] Aprovação IPAM pendente #{change.id}",
+        f"{current_user().email} enviou: {change.title}\n\nAcesse o Admin Center para revisar.",
+    )
+    return change
+
+
+def _audit_application(log) -> str:
+    action = str(getattr(log, "action", "") or "")
+    if action.startswith((
+        "auth.", "user.", "group.", "setting.", "theme.", "notification.",
+        "avatar.", "profile.", "company.", "customer.", "pop_dc.", "service.",
+    )):
+        return "admin_center"
+    if action.startswith(("ipam.", "block.", "entry.", "change.", "publication.", "geofeed.")):
+        return "ipam_geofeed"
+    if action.startswith(("scan.", "health.", "monitoring.")):
+        return "isp_network_health"
+    return "admin_center"
 
 
 def _roles_for_form() -> list[Role]:
@@ -298,7 +1093,51 @@ def _admin_scans_token() -> str:
     ).hexdigest()
 
 
-def _fetch_running_scans() -> dict:
+@bp.get("/internal/health-users")
+@limiter.exempt
+def internal_health_users():
+    """Private directory for Health's delegated scan management."""
+    supplied = request.headers.get("X-ISP-Admin-Token", "")
+    expected = _admin_scans_token()
+    if not expected or not supplied or not hmac.compare_digest(supplied, expected):
+        abort(403)
+    users = User.query.filter(User.active.is_(True), User.deleted_at.is_(None)).order_by(User.email).all()
+    return jsonify({"users": [
+        {"subject": str(user.id), "email": user.email,
+         "name": user.display_name or user.email, "role": user.role}
+        for user in users if user.has_application_access("isp_network_health")
+    ]})
+
+
+def _presence_token(subject: str, email: str) -> str:
+    secret = str(current_app.config.get("SSO_SIGNING_SECRET", ""))
+    if not secret:
+        return ""
+    message = f"isp-network-tools:presence:v1:{subject}:{email}".encode("utf-8")
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
+
+
+@bp.post("/internal/presence")
+@csrf.exempt
+@limiter.exempt
+def internal_presence():
+    """Accept a signed activity heartbeat from another suite application."""
+    payload = request.get_json(silent=True) or {}
+    subject = str(payload.get("subject", "")).strip()
+    email = str(payload.get("email", "")).strip().casefold()
+    supplied = request.headers.get("X-ISP-Presence-Token", "")
+    expected = _presence_token(subject, email)
+    if not subject or not email or not expected or not supplied or not hmac.compare_digest(supplied, expected):
+        abort(403)
+    user = db.session.get(User, int(subject)) if subject.isdigit() else None
+    if not user or user.deleted_at is not None or not user.active or user.email.casefold() != email:
+        abort(403)
+    user.last_seen_at = utcnow()
+    db.session.commit()
+    return ("", 204)
+
+
+def _fetch_running_scans(*, include_details: bool = True) -> dict:
     """Read active health scans over the private Docker network."""
     base_url = str(current_app.config.get("HEALTH_INTERNAL_BASE_URL", "")).rstrip("/")
     token = _admin_scans_token()
@@ -310,6 +1149,7 @@ def _fetch_running_scans() -> dict:
         ).netloc or "network-health.localhost"
         response = requests.get(
             f"{base_url}/internal/admin/scans",
+            params={"details": "1" if include_details else "0"},
             # Flask's trusted-host check sees the Docker service name as Host;
             # use the configured public health hostname for the internal call.
             headers={"X-ISP-Admin-Token": token, "Host": health_host},
@@ -325,6 +1165,168 @@ def _fetch_running_scans() -> dict:
         "available": True,
         "scans": [scan for scan in scans if isinstance(scan, dict)],
     }
+
+
+def _fetch_health_audit_logs(limit: int = 500) -> list[SimpleNamespace]:
+    """Read the Health audit stream through its authenticated internal API."""
+    base_url = str(current_app.config.get("HEALTH_INTERNAL_BASE_URL", "")).rstrip("/")
+    token = _admin_scans_token()
+    if not base_url or not token:
+        return []
+    health_host = urlparse(str(current_app.config.get("HEALTH_BASE_URL", ""))).netloc or "network-health.localhost"
+    try:
+        response = requests.get(
+            f"{base_url}/internal/admin/audit",
+            params={"limit": max(1, min(limit, 500))},
+            headers={"X-ISP-Admin-Token": token, "Host": health_host},
+            timeout=3,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        current_app.logger.warning("Consulta da auditoria do Network Health indisponível")
+        return []
+    result = []
+    for item in payload.get("logs", []) if isinstance(payload, dict) else []:
+        if not isinstance(item, dict):
+            continue
+        created_at = item.get("created_at")
+        try:
+            created_at = datetime.fromisoformat(str(created_at).replace("Z", "+00:00"))
+        except (TypeError, ValueError):
+            continue
+        result.append(
+            SimpleNamespace(
+                created_at=created_at,
+                user=SimpleNamespace(email=str(item.get("actor_email") or "Sistema")),
+                action=str(item.get("action") or "health.event"),
+                entity_type=str(item.get("entity_type") or ""),
+                entity_id=str(item.get("entity_id") or ""),
+                source_ip=str(item.get("source_ip") or "interno"),
+                details=str(item.get("details") or ""),
+            )
+        )
+    return result
+
+
+def _fetch_recent_health_scans() -> list[dict]:
+    user = current_user()
+    if not user.has_application_access("isp_network_health"):
+        return []
+    base_url = str(current_app.config.get("HEALTH_INTERNAL_BASE_URL", "")).rstrip("/")
+    token = _admin_scans_token()
+    if not base_url or not token:
+        return []
+    health_host = urlparse(str(current_app.config.get("HEALTH_BASE_URL", ""))).netloc
+    try:
+        response = requests.get(
+            f"{base_url}/internal/admin/recent-scans",
+            params={} if user.is_super_admin() else {"subject": str(user.id)},
+            headers={"X-ISP-Admin-Token": token, "Host": health_host},
+            timeout=3,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError):
+        current_app.logger.warning("Consulta do histórico recente do Network Health indisponível")
+        return []
+    scans = payload.get("scans", []) if isinstance(payload, dict) else []
+    scans = [scan for scan in scans if isinstance(scan, dict)]
+    emails = [scan.get("requester_email", "") for scan in scans]
+    users = {item.email: item for item in User.query.filter(User.email.in_(emails)).all()} if emails else {}
+    for scan in scans:
+        actor = users.get(scan.get("requester_email"))
+        scan["requester_name"] = (actor.nickname or actor.display_name or actor.email) if actor else scan.get("requester_email", "Usuário")
+        scan["scan_url"] = url_for(
+            "panel.issue_sso",
+            target="isp_network_health",
+            scan_id=int(scan["id"]),
+        )
+    return scans
+
+
+def _recent_audit(*prefixes: str, limit: int = 8) -> list[AuditLog]:
+    filters = [AuditLog.action.startswith(prefix) for prefix in prefixes]
+    query = AuditLog.query
+    if filters:
+        query = query.filter(or_(*filters))
+    return query.order_by(AuditLog.created_at.desc()).limit(limit).all()
+
+
+def _ipam_networks() -> list[tuple[IpamAllocation, ipaddress._BaseNetwork]]:
+    result = []
+    for allocation in IpamAllocation.query.filter_by(
+        scope="public", approval_status="approved"
+    ).filter(IpamAllocation.status != "decommissioned").all():
+        try:
+            result.append((allocation, _ipam_network(allocation.prefix, allocation.resource_kind)))
+        except ValueError:
+            continue
+    return result
+
+
+def _public_ipam_metrics() -> dict[str, int]:
+    records = _ipam_networks()
+    all_networks = []
+    used_networks = []
+    for version in (4, 6):
+        all_networks.extend(ipaddress.collapse_addresses([
+            network for _item, network in records if network.version == version
+        ]))
+        used_networks.extend(ipaddress.collapse_addresses([
+            network for item, network in records
+            if network.version == version and item.status in {"allocated", "reserved", "blocked", "decommissioned"}
+        ]))
+    total = sum(int(network.num_addresses) for network in all_networks)
+    used = sum(int(network.num_addresses) for network in used_networks)
+    available = max(0, total - used)
+    ipv4_available = sum(
+        int(network.num_addresses)
+        for network in all_networks
+        if network.version == 4
+    ) - sum(
+        int(network.num_addresses)
+        for network in used_networks
+        if network.version == 4
+    )
+    return {
+        "available_ips": available,
+        "public_ipv4": sum(int(network.num_addresses) for network in all_networks if network.version == 4),
+        "public_24s": sum(int(network.num_addresses) for network in all_networks if network.version == 4) // 256,
+        "available_ipv4": max(0, ipv4_available),
+        "available_24s": max(0, ipv4_available) // 256,
+        "public_resources": len(records),
+        "public_blocks": sum(1 for item, _network in records if item.resource_kind == "block"),
+    }
+
+
+def _service_values(service: ServiceCatalogItem | None = None) -> dict:
+    name = _ipam_text(request.form.get("name"), 180)
+    service_type = _ipam_text(request.form.get("service_type"), 80) or "Serviço"
+    specification = _ipam_text(request.form.get("specification"), 120)
+    description = _ipam_text(request.form.get("description"), 255)
+    values = {
+        "name": name,
+        "service_type": service_type,
+        "specification": specification,
+        "description": description,
+        "active": request.form.get("active") == "on",
+    }
+    if not name:
+        raise ValueError("O nome do serviço é obrigatório.")
+    duplicate = ServiceCatalogItem.query.filter(func.lower(ServiceCatalogItem.name) == name.casefold())
+    if service:
+        duplicate = duplicate.filter(ServiceCatalogItem.id != service.id)
+        for key, value in values.items():
+            setattr(service, key, value)
+    if duplicate.first():
+        raise ValueError("Já existe um serviço com este nome.")
+    if not service:
+        normalized_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+        values["code"] = re.sub(r"[^a-z0-9]+", "-", normalized_name.casefold()).strip("-")[:80]
+        if not values["code"]:
+            values["code"] = f"servico-{secrets.token_hex(4)}"
+    return values
 
 
 def _dashboard_map_data(snapshot: dict) -> dict:
@@ -412,7 +1414,25 @@ def _dashboard_map_data(snapshot: dict) -> dict:
                 for company in sorted(item["companies"].values(), key=lambda value: value["name"].casefold())
             ],
         })
-    return {"macroregions": serialize(macro), "states": serialize(states), "cities": city_items}
+    locations = []
+    for allocation in IpamAllocation.query.filter(
+        IpamAllocation.latitude.isnot(None),
+        IpamAllocation.longitude.isnot(None),
+        IpamAllocation.status != "decommissioned",
+        IpamAllocation.approval_status == "approved",
+    ).order_by(IpamAllocation.prefix).all():
+        locations.append({
+            "prefix": allocation.prefix,
+            "resource_kind": allocation.resource_kind,
+            "scope": allocation.scope,
+            "address": allocation.allocation_address,
+            "latitude": float(allocation.latitude),
+            "longitude": float(allocation.longitude),
+            "customer": allocation.customer.name if allocation.customer else "",
+            "pop": allocation.pop.code if allocation.pop else "",
+            "equipment": allocation.equipment.name if allocation.equipment else "",
+        })
+    return {"macroregions": serialize(macro), "states": serialize(states), "cities": city_items, "locations": locations}
 
 
 def _create_change_request(
@@ -483,12 +1503,15 @@ def dashboard():
     working = build_snapshot()
     validation = validate_snapshot(working)
     latest = Publication.query.order_by(Publication.version.desc()).first()
-    running_scan_data = _fetch_running_scans() if user.is_super_admin() else {"available": True, "scans": []}
+    running_scan_data = _fetch_running_scans(include_details=False) if user.is_super_admin() else {"available": True, "scans": []}
+    ipam_metrics = _public_ipam_metrics()
     return render_template(
         "dashboard.html",
         company_count=Company.query.filter_by(active=True).count(),
-        block_count=NetworkBlock.query.filter_by(active=True).count(),
-        entry_count=FeedEntry.query.count(),
+        available_ips=ipam_metrics["public_ipv4"],
+        available_24s=ipam_metrics["public_24s"],
+        active_customer_count=Customer.query.filter_by(active=True).count(),
+        active_service_count=ServiceCatalogItem.query.filter_by(active=True).count(),
         working_hash=snapshot_hash(working),
         latest=latest,
         validation=validation,
@@ -498,8 +1521,994 @@ def dashboard():
         ).count(),
         running_scan_count=len(running_scan_data["scans"]),
         map_data=_dashboard_map_data(working),
-        scanned_blocks=_latest_scanned_blocks(),
+        recent_health_scans=_fetch_recent_health_scans(),
     )
+
+
+@bp.get("/api/dashboard/operations")
+@login_required
+def dashboard_operations():
+    user = current_user()
+    running = _fetch_running_scans(include_details=False) if user.is_super_admin() else {"available": True, "scans": []}
+    return jsonify(
+        {
+            "online_user_count": len(_online_users()),
+            "running_scan_count": len(running.get("scans", [])),
+            "running_available": bool(running.get("available")),
+            "recent_health_scans": _fetch_recent_health_scans(),
+        }
+    )
+
+
+@bp.get("/cadastro")
+@login_required
+def catalog():
+    return render_template("cadastro.html")
+
+
+@bp.get("/customers")
+@login_required
+@permission_required("catalog.customers.view")
+def customers():
+    search = _clean(request.args.get("q"), 120)
+    query = Customer.query
+    if search:
+        query = query.filter(
+            or_(
+                Customer.name.ilike(f"%{search}%"),
+                Customer.cnpj.ilike(f"%{search}%"),
+                Customer.contact_email.ilike(f"%{search}%"),
+            )
+        )
+    return render_template(
+        "customers.html",
+        customers=query.order_by(Customer.active.desc(), Customer.name).all(),
+        search=search,
+        recent_activity=_recent_audit("customer."),
+    )
+
+
+@bp.get("/pops-dcs")
+@login_required
+@permission_required("catalog.pops.view")
+def pops_dcs():
+    search = _clean(request.args.get("q"), 120)
+    query = PopDc.query
+    if search:
+        query = query.filter(
+            or_(
+                PopDc.name.ilike(f"%{search}%"),
+                PopDc.code.ilike(f"%{search}%"),
+                PopDc.city.ilike(f"%{search}%"),
+            )
+        )
+    return render_template(
+        "pops_dcs.html",
+        pops=query.order_by(PopDc.active.desc(), PopDc.name).all(),
+        search=search,
+        recent_activity=_recent_audit("pop_dc."),
+    )
+
+
+@bp.get("/services")
+@login_required
+@permission_required("catalog.services.view")
+def services():
+    search = _clean(request.args.get("q"), 120)
+    query = ServiceCatalogItem.query
+    if search:
+        query = query.filter(or_(
+            ServiceCatalogItem.name.ilike(f"%{search}%"),
+            ServiceCatalogItem.service_type.ilike(f"%{search}%"),
+            ServiceCatalogItem.specification.ilike(f"%{search}%"),
+        ))
+    return render_template(
+        "services.html",
+        services=query.order_by(ServiceCatalogItem.active.desc(), ServiceCatalogItem.name).all(),
+        search=search,
+        recent_activity=_recent_audit("service."),
+    )
+
+
+@bp.route("/services/new", methods=["GET", "POST"])
+@permission_required("catalog.services.manage")
+def service_new():
+    if request.method == "POST":
+        try:
+            values = _service_values()
+            service = ServiceCatalogItem(**values)
+            db.session.add(service)
+            db.session.flush()
+            audit("service.created", "service", service.id, {"name": service.name})
+            return _commit_or_flash("Serviço cadastrado no catálogo.", "panel.services")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um serviço com esse código ou nome.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template("service_form.html", service=None)
+
+
+@bp.route("/services/<int:service_id>/edit", methods=["GET", "POST"])
+@permission_required("catalog.services.manage")
+def service_edit(service_id: int):
+    service = db.get_or_404(ServiceCatalogItem, service_id)
+    if request.method == "POST":
+        try:
+            before = {"name": service.name, "active": service.active}
+            _service_values(service)
+            audit("service.updated", "service", service.id, {"before": before, "after": {"name": service.name, "active": service.active}})
+            return _commit_or_flash("Serviço atualizado.", "panel.services")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template("service_form.html", service=service)
+
+
+@bp.post("/services/<int:service_id>/delete")
+@permission_required("catalog.services.manage")
+def service_delete(service_id: int):
+    service = db.get_or_404(ServiceCatalogItem, service_id)
+    service.active = False
+    audit("service.deactivated", "service", service.id, {"name": service.name})
+    return _commit_or_flash("Serviço desativado. Vínculos existentes foram preservados.", "panel.services")
+
+
+@bp.get("/ipam")
+@application_required("ipam_geofeed")
+def ipam():
+    try:
+        search = _ipam_text(request.args.get("q"), 120)
+        requested_classification = _ipam_text(request.args.get("classification") or request.args.get("scope"), 16).lower()
+        tab = _ipam_text(request.args.get("tab"), 16).lower() or requested_classification
+        tab = tab if tab in {"public", "private"} else "public"
+        classification = tab
+        resource_kind = _ipam_text(request.args.get("resource_kind"), 16).lower() or "all"
+        status = _ipam_text(request.args.get("status"), 24).lower() or "all"
+        family = _ipam_text(request.args.get("family"), 4).lower() or "all"
+        sort = _ipam_text(request.args.get("sort"), 16).lower() or "largest"
+        company_id = _ipam_text(request.args.get("company_id"), 16)
+        customer_id = _ipam_text(request.args.get("customer_id"), 16)
+        pop_id = _ipam_text(request.args.get("pop_id"), 16)
+    except ValueError:
+        abort(400)
+    query = IpamAllocation.query
+    if search:
+        query = query.filter(
+            or_(
+                IpamAllocation.prefix.ilike(f"%{search}%"),
+                IpamAllocation.description.ilike(f"%{search}%"),
+                IpamAllocation.allocation_address.ilike(f"%{search}%"),
+            )
+        )
+    if classification in {"public", "private", "special"}:
+        query = query.filter(IpamAllocation.scope == classification)
+    if resource_kind in {"block", "ip"}:
+        query = query.filter(IpamAllocation.resource_kind == resource_kind)
+    if status in IPAM_STATUSES:
+        query = query.filter(IpamAllocation.status == status)
+    if family in {"4", "6"}:
+        query = query.filter(IpamAllocation.prefix.contains(".") if family == "4" else IpamAllocation.prefix.contains(":"))
+    if company_id:
+        try:
+            query = query.filter(IpamAllocation.company_id == int(company_id))
+        except ValueError:
+            abort(400)
+    if customer_id:
+        try:
+            query = query.filter(IpamAllocation.customer_id == int(customer_id))
+        except ValueError:
+            abort(400)
+    if pop_id:
+        try:
+            query = query.filter(IpamAllocation.pop_id == int(pop_id))
+        except ValueError:
+            abort(400)
+    allocations = query.all()
+    def allocation_sort_key(item):
+        try:
+            network = _ipam_network(item.prefix, item.resource_kind)
+            return (network.version, network.prefixlen, int(network.network_address), item.prefix)
+        except ValueError:
+            return (9, 999, 0, item.prefix)
+    allocations.sort(key=allocation_sort_key, reverse=sort == "smallest")
+    allocation_ids = {allocation.id for allocation in allocations}
+    effective_statuses = _ipam_effective_statuses()
+    allocation_rows = []
+    for allocation in allocations:
+        if allocation.parent_id in allocation_ids:
+            continue
+        try:
+            network = _ipam_network(allocation.prefix, allocation.resource_kind)
+            has_children = allocation.resource_kind == "block" and (
+                (network.version == 4 and network.prefixlen < 32) or bool(allocation.children)
+            )
+        except ValueError:
+            has_children = bool(allocation.children)
+        allocation_rows.append({
+            "allocation": allocation,
+            "depth": 0,
+            "has_children": has_children,
+            "display_status": effective_statuses.get(allocation.id, allocation.status),
+        })
+    return render_template(
+        "ipam/index.html",
+        allocations=allocations,
+        allocation_rows=allocation_rows,
+        customers=Customer.query.order_by(Customer.active.desc(), Customer.name).all(),
+        pops=PopDc.query.order_by(PopDc.active.desc(), PopDc.name).all(),
+        equipments=IpamEquipment.query.filter_by(active=True).order_by(IpamEquipment.name).all(),
+        companies=Company.query.filter_by(active=True).order_by(Company.name).all(),
+        source_blocks=NetworkBlock.query.join(Company).filter(NetworkBlock.active.is_(True), Company.active.is_(True)).order_by(NetworkBlock.cidr).all(),
+        parent_blocks=IpamAllocation.query.filter_by(resource_kind="block").filter(
+            IpamAllocation.status != "decommissioned",
+            IpamAllocation.approval_status == "approved",
+        ).order_by(IpamAllocation.prefix).all(),
+        statuses=IPAM_STATUSES,
+        search=search,
+        classification=classification,
+        tab=tab,
+        resource_kind=resource_kind,
+        status=status,
+        family=family,
+        sort=sort,
+        company_id=company_id,
+        customer_id=customer_id,
+        pop_id=pop_id,
+        public_count=IpamAllocation.query.filter_by(scope="public").filter(IpamAllocation.status != "decommissioned").count(),
+        private_count=IpamAllocation.query.filter_by(scope="private").filter(IpamAllocation.status != "decommissioned").count(),
+        special_count=IpamAllocation.query.filter_by(scope="special").filter(IpamAllocation.status != "decommissioned").count(),
+        published_fields=(
+            ("ip_prefix", "Prefixo IP"),
+            ("alpha2code", "País ISO 3166-1 alpha-2"),
+            ("region", "Região ISO 3166-2"),
+            ("city", "Cidade"),
+            ("postal_code", "Código postal"),
+        ),
+    )
+
+
+def _ipam_latest_block(owner: IpamAllocation) -> dict | None:
+    snapshot = latest_published_snapshot() or {}
+    candidates = {owner.prefix}
+    if owner.source_block:
+        candidates.add(owner.source_block.cidr)
+    canonical = set()
+    for value in candidates:
+        try:
+            canonical.add(str(ipaddress.ip_network(value, strict=True)))
+        except ValueError:
+            continue
+    for block in snapshot.get("blocks", []):
+        try:
+            cidr = str(ipaddress.ip_network(str(block.get("cidr", "")), strict=True))
+        except ValueError:
+            continue
+        if cidr in canonical:
+            return block
+    return None
+
+
+def _ipam_tree_sources(owner: IpamAllocation) -> tuple[list[dict], dict[str, FeedEntry]]:
+    published = []
+    block = _ipam_latest_block(owner)
+    for entry in (block or {}).get("entries", []):
+        try:
+            network = ipaddress.ip_network(str(entry.get("prefix", "")), strict=True)
+        except ValueError:
+            continue
+        published.append({"network": network, "entry": entry})
+    feed_entries = {}
+    if owner.source_block_id:
+        for entry in FeedEntry.query.filter_by(block_id=owner.source_block_id).all():
+            try:
+                feed_entries[str(ipaddress.ip_network(entry.prefix, strict=True))] = entry
+            except ValueError:
+                continue
+    return published, feed_entries
+
+
+def _ipam_owner_and_parent(owner_id: int, parent_prefix: str) -> tuple[IpamAllocation, ipaddress._BaseNetwork, ipaddress._BaseNetwork]:
+    owner = db.get_or_404(IpamAllocation, owner_id)
+    if owner.resource_kind != "block" or owner.status == "decommissioned":
+        abort(404)
+    try:
+        owner_network = _ipam_network(owner.prefix, owner.resource_kind)
+        parent_network = ipaddress.ip_network(parent_prefix, strict=True)
+    except ValueError:
+        abort(400)
+    if parent_network.version != owner_network.version or not parent_network.subnet_of(owner_network):
+        abort(400)
+    return owner, owner_network, parent_network
+
+
+def _ipam_nested_allocations(owner: IpamAllocation, owner_network: ipaddress._BaseNetwork) -> list[tuple[IpamAllocation, ipaddress._BaseNetwork]]:
+    result = []
+    for allocation in IpamAllocation.query.filter(
+        IpamAllocation.id != owner.id,
+        IpamAllocation.status != "decommissioned",
+    ).all():
+        try:
+            network = _ipam_network(allocation.prefix, allocation.resource_kind)
+        except ValueError:
+            continue
+        if network.version == owner_network.version and network.subnet_of(owner_network):
+            result.append((allocation, network))
+    return result
+
+
+def _ipam_tree_nodes(owner: IpamAllocation, owner_network: ipaddress._BaseNetwork, parent_network: ipaddress._BaseNetwork) -> list[dict]:
+    published, feed_entries = _ipam_tree_sources(owner)
+    allocations = _ipam_nested_allocations(owner, owner_network)
+    effective_statuses = _ipam_effective_statuses()
+    if parent_network.version == 4 and parent_network.prefixlen < 24:
+        networks = list(parent_network.subnets(new_prefix=24))
+        return [{
+            "prefix": str(network), "display": str(network), "network": network,
+            "source": "Faixa calculada", "grouped": False, "allocation": None,
+            "feed_entry": None, "has_children": True,
+        } for network in networks]
+
+    candidates: dict[str, dict] = {}
+    for item in published:
+        network = item["network"]
+        if network != parent_network and network.subnet_of(parent_network):
+            candidates[str(network)] = {
+                "prefix": str(network), "display": str(network.network_address) if network.prefixlen == network.max_prefixlen else str(network),
+                "network": network, "source": "Último Geofeed publicado", "grouped": network.prefixlen < network.max_prefixlen,
+                "allocation": None, "feed_entry": feed_entries.get(str(network)), "has_children": network.prefixlen < network.max_prefixlen,
+            }
+    for allocation, network in allocations:
+        if network != parent_network and network.subnet_of(parent_network):
+            candidates[str(network)] = {
+                "prefix": str(network), "display": allocation.prefix, "network": network,
+                "source": "Cadastro IPAM", "grouped": allocation.resource_kind == "block" and network.prefixlen < network.max_prefixlen,
+                "allocation": allocation, "feed_entry": feed_entries.get(str(network)),
+                "has_children": allocation.resource_kind == "block" and network.prefixlen < network.max_prefixlen,
+                "display_status": effective_statuses.get(allocation.id, allocation.status),
+            }
+
+    ordered = sorted(candidates.values(), key=lambda node: (node["network"].prefixlen, int(node["network"].network_address)))
+    top_level = []
+    for node in ordered:
+        if any(node["network"].subnet_of(parent["network"]) for parent in top_level):
+            continue
+        top_level.append(node)
+
+    if parent_network.version != 4 or parent_network.prefixlen >= 32:
+        return top_level
+    covered = [node["network"] for node in top_level]
+    exact_by_address = {
+        int(node["network"].network_address): node
+        for node in ordered
+        if node["network"].prefixlen == 32
+    }
+    nodes = list(top_level)
+    for address in parent_network:
+        if any(ipaddress.ip_network(f"{address}/32").subnet_of(network) for network in covered):
+            continue
+        exact = exact_by_address.get(int(address))
+        if exact:
+            nodes.append(exact)
+        else:
+            nodes.append({
+                "prefix": f"{address}/32", "display": str(address), "network": ipaddress.ip_network(f"{address}/32"),
+                "source": "Disponível", "grouped": False, "allocation": None,
+                "feed_entry": None, "has_children": False,
+            })
+    return sorted(nodes, key=lambda node: int(node["network"].network_address))
+
+
+@bp.get("/ipam/tree/children")
+@application_required("ipam_geofeed")
+def ipam_tree_children():
+    try:
+        owner_id = int(request.args.get("owner_id", ""))
+        parent_prefix = _ipam_text(request.args.get("parent_prefix"), 64)
+    except (TypeError, ValueError):
+        abort(400)
+    owner, owner_network, parent_network = _ipam_owner_and_parent(owner_id, parent_prefix)
+    nodes = _ipam_tree_nodes(owner, owner_network, parent_network)
+    form_parent = owner
+    for allocation, network in _ipam_nested_allocations(owner, owner_network):
+        if network == parent_network and allocation.resource_kind == "block":
+            form_parent = allocation
+            break
+    parent_effective, _parent_sources = _ipam_child_inherited_values(form_parent, owner.scope)
+    for node in nodes:
+        node["effective"], node["effective_sources"] = (
+            _ipam_child_inherited_values(node["allocation"], owner.scope)
+            if node["allocation"] else ({field: parent_effective[field] for field in IPAM_INHERITED_FIELDS if field in parent_effective}, {})
+        )
+        node["effective_customer"] = db.session.get(Customer, node["effective"].get("customer_id")) if node["effective"].get("customer_id") else None
+        node["effective_pop"] = db.session.get(PopDc, node["effective"].get("pop_id")) if node["effective"].get("pop_id") else None
+        node["effective_router"] = db.session.get(IpamEquipment, node["effective"].get("router_id")) if node["effective"].get("router_id") else None
+        node["effective_cpe"] = db.session.get(IpamEquipment, node["effective"].get("cpe_id")) if node["effective"].get("cpe_id") else None
+    return render_template(
+        "ipam/_tree_rows.html", owner=owner, form_parent=form_parent, parent_network=parent_network,
+        nodes=nodes, statuses=IPAM_STATUSES,
+    )
+
+
+@bp.get("/ipam/subnet-suggestions")
+@application_required("ipam_geofeed")
+def ipam_subnet_suggestions():
+    try:
+        owner_id = int(request.args.get("owner_id", ""))
+        parent_prefix = _ipam_text(request.args.get("parent_prefix"), 64)
+        prefixlen = int(request.args.get("prefixlen", ""))
+    except (TypeError, ValueError):
+        abort(400)
+    owner, owner_network, parent_network = _ipam_owner_and_parent(owner_id, parent_prefix)
+    if parent_network.version != 4 or prefixlen <= parent_network.prefixlen or prefixlen > 32:
+        abort(400)
+    published, _feed_entries = _ipam_tree_sources(owner)
+    existing_networks = [item["network"] for item in published if item["network"] != parent_network and item["network"].subnet_of(parent_network)]
+    existing_networks.extend(
+        network for _allocation, network in _ipam_nested_allocations(owner, owner_network)
+        if network != parent_network and network.subnet_of(parent_network)
+    )
+    suggestions = []
+    for candidate in parent_network.subnets(new_prefix=prefixlen):
+        if any(candidate == existing for existing in existing_networks):
+            continue
+        suggestions.append(str(candidate))
+        if len(suggestions) >= 64:
+            break
+    return jsonify({
+        "parent": str(parent_network), "prefixlen": prefixlen,
+        "suggestions": suggestions,
+        "occupied": sorted({str(network) for network in existing_networks}, key=lambda value: int(ipaddress.ip_network(value).network_address)),
+    })
+
+
+def _geocode_address():
+    """Proxy address lookup through the server so browser CSP/CORS do not block it."""
+    try:
+        query = _ipam_text(request.args.get("q"), 200)
+    except ValueError:
+        abort(400)
+    if len(query) < 3:
+        return jsonify({"results": [], "error": "Informe pelo menos 3 caracteres."}), 400
+
+    suite_name = current_app.config.get("SUITE_NAME", "ISP Network Tools")
+    service_url = current_app.config.get("ADMIN_BASE_URL") or current_app.config.get("PUBLIC_BASE_URL") or "https://admin-isp.alhambrait.com.br"
+    user_agent = f"Mozilla/5.0 (compatible; {suite_name}/1.0; +{service_url})"
+    try:
+        response = requests.get(
+            "https://nominatim.openstreetmap.org/search",
+            params={
+                "format": "jsonv2",
+                "limit": "5",
+                "countrycodes": "br",
+                "accept-language": "pt-BR",
+                "q": query,
+            },
+            headers={"Accept": "application/json", "User-Agent": user_agent},
+            timeout=(3, 8),
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except (requests.RequestException, ValueError) as exc:
+        current_app.logger.warning("Geocodificação falhou: %s", type(exc).__name__)
+        return jsonify({"results": [], "error": "O serviço de localização está indisponível no momento."}), 502
+
+    results = []
+    for item in payload if isinstance(payload, list) else []:
+        try:
+            latitude = float(item["lat"])
+            longitude = float(item["lon"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not (-90 <= latitude <= 90 and -180 <= longitude <= 180):
+            continue
+        results.append({
+            "lat": latitude,
+            "lon": longitude,
+            "display_name": _clean(item.get("display_name"), 500),
+        })
+    return jsonify({"results": results})
+
+
+@bp.get("/geocode")
+@login_required
+@limiter.limit("20 per minute")
+def geocode_address():
+    return _geocode_address()
+
+
+@bp.get("/ipam/geocode")
+@application_required("ipam_geofeed")
+@limiter.limit("20 per minute")
+def ipam_geocode():
+    return _geocode_address()
+
+
+def _ipam_allocation_form_context(allocation: IpamAllocation | None = None) -> dict:
+    prefix_value = allocation.prefix if allocation else (request.form.get("prefix") or request.args.get("prefix") or "")
+    source_value = allocation.source_block_id if allocation else (request.form.get("source_block_id") or request.args.get("source_block_id") or "")
+    geofeed_preview = None
+    if prefix_value and source_value:
+        try:
+            source_id = int(source_value)
+            canonical = str(ipaddress.ip_network(prefix_value, strict=False))
+            snapshot = latest_published_snapshot() or {}
+            for block in snapshot.get("blocks", []):
+                if int(block.get("id", -1)) != source_id:
+                    continue
+                geofeed_preview = next(
+                    (entry for entry in block.get("entries", []) if str(ipaddress.ip_network(str(entry.get("prefix", "")), strict=True)) == canonical),
+                    None,
+                )
+                break
+        except (TypeError, ValueError):
+            geofeed_preview = None
+    parent_value = (request.form.get("parent_id") if request.form else None) or (allocation.parent_id if allocation else request.args.get("parent_id") or "")
+    try:
+        selected_parent = db.session.get(IpamAllocation, int(parent_value)) if parent_value else None
+    except (TypeError, ValueError):
+        selected_parent = None
+    try:
+        preview_network = ipaddress.ip_network(prefix_value, strict=False) if prefix_value else None
+    except ValueError:
+        preview_network = None
+    preview_scope = _classify_ipam_network(preview_network) if preview_network else None
+    inherited, inherited_sources = _ipam_child_inherited_values(selected_parent, preview_scope)
+    form_values = {}
+    for field in IPAM_EFFECTIVE_FIELDS:
+        if field in IPAM_INHERITED_FIELDS and field in inherited:
+            form_values[field] = inherited[field]
+        elif request.form:
+            form_values[field] = request.form.get(field, "")
+        elif allocation:
+            form_values[field] = getattr(allocation, field, None) or ""
+        else:
+            form_values[field] = ""
+    preview_network = preview_network or ipaddress.ip_network("0.0.0.0/0")
+    preview_source = db.session.get(NetworkBlock, int(source_value)) if str(source_value).isdigit() else None
+    if "geofeed_region" not in inherited:
+        form_values["geofeed_region"] = (
+            getattr(allocation, "geofeed_region", "") if allocation else ""
+        ) or _ipam_geofeed_region(preview_source, preview_network)
+    resource_kind_value = request.form.get("resource_kind") or request.args.get("resource_kind") or (allocation.resource_kind if allocation else "block")
+    parent_query = IpamAllocation.query.filter_by(resource_kind="block").filter(
+        IpamAllocation.id != (allocation.id if allocation else -1),
+        IpamAllocation.status != "decommissioned",
+        IpamAllocation.approval_status == "approved",
+    ).order_by(IpamAllocation.prefix)
+    parent_blocks = []
+    for candidate in parent_query.all():
+        try:
+            candidate_network = _ipam_network(candidate.prefix, "block")
+            target_network = _ipam_network(
+                _ipam_prefix(prefix_value, resource_kind_value) if prefix_value else "0.0.0.0/0",
+                resource_kind_value,
+            )
+        except (TypeError, ValueError):
+            parent_blocks = parent_query.all()
+            break
+        minimum_parent_prefix = 24 if target_network.version == 4 else 32
+        if (
+            candidate_network.version == target_network.version
+            and target_network != candidate_network
+            and target_network.subnet_of(candidate_network)
+            and (target_network.prefixlen <= minimum_parent_prefix or candidate_network.prefixlen >= minimum_parent_prefix)
+        ):
+            parent_blocks.append(candidate)
+    return {
+        "allocation": allocation,
+        "prefill": {
+            "resource_kind": request.form.get("resource_kind") or request.args.get("resource_kind") or "block",
+            "prefix": request.form.get("prefix") or request.args.get("prefix") or "",
+            "status": request.form.get("status") or request.args.get("status") or "available",
+            "parent_id": request.form.get("parent_id") or request.args.get("parent_id") or "",
+            "company_id": request.form.get("company_id") or request.args.get("company_id") or "",
+            "source_block_id": request.form.get("source_block_id") or request.args.get("source_block_id") or "",
+        },
+        "companies": Company.query.filter_by(active=True).order_by(Company.name).all(),
+        "customers": Customer.query.filter_by(active=True).order_by(Customer.name).all(),
+        "pops": PopDc.query.filter_by(active=True).order_by(PopDc.name).all(),
+        "routers": IpamEquipment.query.filter(
+            IpamEquipment.active.is_(True), IpamEquipment.equipment_type == "router"
+        ).order_by(IpamEquipment.name).all(),
+        "switches": IpamEquipment.query.filter(
+            IpamEquipment.active.is_(True), IpamEquipment.equipment_type == "switch"
+        ).order_by(IpamEquipment.name).all(),
+        "cpes": IpamEquipment.query.filter(
+            IpamEquipment.active.is_(True), IpamEquipment.equipment_type == "cpe"
+        ).order_by(IpamEquipment.name).all(),
+        "access_points": IpamEquipment.query.filter(
+            IpamEquipment.active.is_(True), IpamEquipment.equipment_type == "radio_ap"
+        ).order_by(IpamEquipment.name).all(),
+        "radio_sts": IpamEquipment.query.filter(
+            IpamEquipment.active.is_(True), IpamEquipment.equipment_type == "radio_st"
+        ).order_by(IpamEquipment.name).all(),
+        "geofeed_preview": geofeed_preview,
+        "inherited": inherited,
+        "inherited_sources": inherited_sources,
+        "form_values": form_values,
+        "parent_contexts": {
+            str(parent.id): {
+                "values": {
+                    field: str(value) if field in {"latitude", "longitude"} else value
+                    for field, value in effective_values.items()
+                },
+                "sources": effective_sources,
+            }
+            for parent in IpamAllocation.query.filter_by(resource_kind="block")
+            .filter(
+                IpamAllocation.id != (allocation.id if allocation else -1),
+                IpamAllocation.status != "decommissioned",
+                IpamAllocation.approval_status == "approved",
+            )
+            for effective_values, effective_sources in [_ipam_child_inherited_values(parent, preview_scope)]
+        },
+        "source_blocks": NetworkBlock.query.join(Company).filter(NetworkBlock.active.is_(True), Company.active.is_(True)).order_by(NetworkBlock.cidr).all(),
+        "parent_blocks": parent_blocks,
+        "statuses": IPAM_STATUSES,
+    }
+
+
+@bp.route("/ipam/equipment/new", methods=["GET", "POST"])
+@permission_required("ipam.equipment.manage")
+def ipam_equipment_new():
+    if request.method == "POST":
+        try:
+            name = _ipam_text(request.form.get("name"), 160)
+            code = _ipam_text(request.form.get("code"), 80).upper()
+            if not name or not code:
+                raise ValueError("Informe o nome e o código do equipamento.")
+            equipment_type = _ipam_text(request.form.get("equipment_type"), 16).lower() or "other"
+            if equipment_type not in {"router", "cpe", "switch", "edge_router", "radio_ap", "radio_st"}:
+                raise ValueError("Tipo de equipamento inválido.")
+            pop_id = _clean(request.form.get("pop_id") or request.args.get("pop_id"), 16)
+            secondary_pop_id = _clean(request.form.get("secondary_pop_id") or request.args.get("secondary_pop_id"), 16)
+            customer_id = _clean(request.form.get("customer_id") or request.args.get("customer_id"), 16)
+            router_id = _clean(request.form.get("router_id") or request.args.get("router_id"), 16)
+            secondary_router_id = _clean(request.form.get("secondary_router_id") or request.args.get("secondary_router_id"), 16)
+            cpe_id = _clean(request.form.get("cpe_id") or request.args.get("cpe_id"), 16)
+            access_point_id = _clean(request.form.get("access_point_id") or request.args.get("access_point_id"), 16)
+            pop = db.session.get(PopDc, int(pop_id)) if pop_id else None
+            secondary_pop = db.session.get(PopDc, int(secondary_pop_id)) if secondary_pop_id else None
+            customer = db.session.get(Customer, int(customer_id)) if customer_id else None
+            router = db.session.get(IpamEquipment, int(router_id)) if router_id else None
+            secondary_router = db.session.get(IpamEquipment, int(secondary_router_id)) if secondary_router_id else None
+            cpe = db.session.get(IpamEquipment, int(cpe_id)) if cpe_id else None
+            access_point = db.session.get(IpamEquipment, int(access_point_id)) if access_point_id else None
+            if pop_id and (not pop or not pop.active):
+                raise ValueError("POP/DC inválido.")
+            if secondary_pop_id and (not secondary_pop or not secondary_pop.active):
+                raise ValueError("Segundo POP/DC inválido.")
+            if pop and secondary_pop and pop.id == secondary_pop.id:
+                raise ValueError("As abordagens devem usar POPs/DCs diferentes.")
+            if customer_id and (not customer or not customer.active):
+                raise ValueError("Cliente inválido.")
+
+            def validate_router(item, label, expected_pop):
+                if not item or not item.active or item.equipment_type != "router":
+                    raise ValueError(f"{label} inválido.")
+                if expected_pop and item.pop_id not in {None, expected_pop.id}:
+                    raise ValueError(f"{label} não pertence ao POP/DC selecionado.")
+
+            if equipment_type in {"router", "switch", "edge_router"} and not pop:
+                raise ValueError("Selecione o POP/DC onde o equipamento será instalado.")
+            if equipment_type == "radio_ap" and (not pop or not customer):
+                raise ValueError("Rádio AP exige POP/DC e cliente atendido.")
+            if equipment_type == "radio_st" and (not customer or not cpe or not access_point):
+                raise ValueError("Rádio cliente (ST) exige cliente, CPE e rádio AP.")
+            if equipment_type == "cpe" and not customer:
+                raise ValueError("CPE exige um cliente proprietário.")
+            if equipment_type == "cpe":
+                if pop and not router:
+                    raise ValueError("Selecione o Roteador POP da primeira abordagem da CPE.")
+                if secondary_pop and not secondary_router:
+                    raise ValueError("Selecione o Roteador POP da segunda abordagem da CPE.")
+                if router:
+                    validate_router(router, "Roteador POP", pop)
+                if secondary_router:
+                    validate_router(secondary_router, "Segundo Roteador POP", secondary_pop)
+                duplicate = IpamEquipment.query.filter_by(
+                    equipment_type="cpe", customer_id=customer.id, active=True
+                )
+                if duplicate.first():
+                    raise ValueError("Este cliente já possui uma CPE ativa. Edite a CPE existente para vincular as duas abordagens.")
+            if equipment_type == "radio_ap":
+                current_count = IpamEquipment.query.filter_by(
+                    equipment_type="radio_ap", pop_id=pop.id, active=True
+                ).count()
+                if current_count >= 100:
+                    raise ValueError("Este POP/DC já possui o limite de 100 rádios AP ativos.")
+            if equipment_type == "radio_st":
+                if cpe.equipment_type != "cpe" or not cpe.active or cpe.customer_id not in {None, customer.id}:
+                    raise ValueError("A CPE selecionada não pertence ao cliente informado.")
+                if access_point.equipment_type != "radio_ap" or not access_point.active:
+                    raise ValueError("Selecione um rádio AP ativo.")
+                if access_point.customer_id not in {None, customer.id}:
+                    raise ValueError("O rádio AP selecionado atende outro cliente.")
+                pop = access_point.pop
+                pop_id = str(pop.id) if pop else pop_id
+
+            equipment = IpamEquipment(
+                equipment_type=equipment_type,
+                name=name,
+                code=code,
+                pop_id=pop.id if pop else None,
+                secondary_pop_id=secondary_pop.id if secondary_pop else None,
+                customer_id=customer.id if customer else None,
+                router_id=router.id if router else None,
+                secondary_router_id=secondary_router.id if secondary_router else None,
+                cpe_id=cpe.id if cpe else None,
+                access_point_id=access_point.id if access_point else None,
+                vendor=_ipam_text(request.form.get("vendor"), 120),
+                model=_ipam_text(request.form.get("model"), 120),
+                serial_number=_ipam_text(request.form.get("serial_number"), 120),
+                location=_ipam_text(request.form.get("location"), 255),
+                notes=_ipam_text(request.form.get("notes"), 4000),
+                active=True,
+            )
+            db.session.add(equipment)
+            db.session.flush()
+            audit("ipam.equipment.created", "equipment", equipment.id, {"name": equipment.name, "code": equipment.code})
+            db.session.commit()
+            return redirect(url_for("panel.ipam", tab="public", equipment_created=equipment.id, equipment_name=equipment.name))
+        except (ValueError, TypeError, IntegrityError) as exc:
+            db.session.rollback()
+            flash("Já existe um equipamento com esse código." if isinstance(exc, IntegrityError) else str(exc), "error")
+    return render_template(
+        "ipam/equipment_form.html",
+        equipment_type=request.form.get("equipment_type") or request.args.get("equipment_type") or "other",
+        result_name=request.args.get("result_name") or "equipment_id",
+        pops=PopDc.query.filter_by(active=True).order_by(PopDc.name).all(),
+        customers=Customer.query.filter_by(active=True).order_by(Customer.name).all(),
+        routers=IpamEquipment.query.filter_by(active=True, equipment_type="router").order_by(IpamEquipment.name).all(),
+        cpes=IpamEquipment.query.filter_by(active=True, equipment_type="cpe").order_by(IpamEquipment.name).all(),
+        access_points=IpamEquipment.query.filter_by(active=True, equipment_type="radio_ap").order_by(IpamEquipment.name).all(),
+    )
+
+
+@bp.route("/ipam/allocations/new", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
+@roles_required("admin", "editor")
+def ipam_allocation_new():
+    if request.method == "POST":
+        try:
+            allocation = IpamAllocation()
+            values = _ipam_allocation_values()
+            if values["scope"] == "special":
+                raise ValueError("Endereços especiais ou reservados não podem ser cadastrados no IPAM.")
+            if values["scope"] == "private" and not current_user().has_permission("ipam.private.manage"):
+                abort(403)
+            if values["scope"] == "public" and not current_user().has_permission("ipam.public.submit"):
+                abort(403)
+            _ipam_check_overlap(values)
+            _ipam_apply_values(allocation, values)
+            db.session.add(allocation)
+            db.session.flush()
+            if values["scope"] == "public":
+                _submit_ipam_approval(allocation, values, "create", values["notes"])
+                audit("ipam.allocation.submitted", "allocation", allocation.id, {"prefix": allocation.prefix, "scope": allocation.scope})
+                return _commit_or_flash("Recurso público enviado para aprovação.", "panel.ipam")
+            allocation.approval_status = "approved"
+            audit("ipam.allocation.created", "allocation", allocation.id, {"prefix": allocation.prefix, "scope": allocation.scope})
+            return _commit_or_flash("Recurso IPAM cadastrado.", "panel.ipam")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um recurso IPAM com esse tipo e prefixo.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template("ipam/allocation_form.html", **_ipam_allocation_form_context())
+
+
+@bp.route("/ipam/allocations/<int:allocation_id>/edit", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
+@roles_required("admin", "editor")
+def ipam_allocation_edit(allocation_id: int):
+    allocation = db.get_or_404(IpamAllocation, allocation_id)
+    if request.method == "POST":
+        try:
+            before = {"prefix": allocation.prefix, "scope": allocation.scope, "status": allocation.status}
+            values = _ipam_allocation_values()
+            if values["scope"] == "special":
+                raise ValueError("Endereços especiais ou reservados não podem ser cadastrados no IPAM.")
+            if values["scope"] == "private" and not current_user().has_permission("ipam.private.manage"):
+                abort(403)
+            if values["scope"] == "public" and not current_user().has_permission("ipam.public.submit"):
+                abort(403)
+            _ipam_check_overlap(values, allocation.id)
+            can_approve_public = current_user().has_permission("ipam.public.approve")
+            if allocation.approval_status == "pending" and not can_approve_public:
+                raise ValueError("Aguarde a revisão da solicitação pendente antes de editar este recurso.")
+            if values["scope"] == "public":
+                if can_approve_public:
+                    _ipam_apply_values(allocation, values)
+                    allocation.approval_status = "approved"
+                    for approval in allocation.approval_requests:
+                        if approval.status == "pending":
+                            approval.status = "approved"
+                            approval.reviewed_by_id = current_user().id
+                            approval.reviewed_at = utcnow()
+                            approval.review_notes = "Aprovado durante a edição por um usuário com permissão de aprovação."
+                    audit("ipam.allocation.updated", "allocation", allocation.id, {"before": before, "after": {"prefix": allocation.prefix, "scope": allocation.scope, "status": allocation.status}, "approved_by": current_user().email})
+                    return _commit_or_flash("Recurso público atualizado e aprovado.", "panel.ipam")
+                _submit_ipam_approval(allocation, values, "update", values["notes"])
+                audit("ipam.allocation.update_submitted", "allocation", allocation.id, {"before": before, "prefix": values["prefix"]})
+                return _commit_or_flash("Alteração do recurso público enviada para aprovação.", "panel.ipam")
+            _ipam_apply_values(allocation, values)
+            allocation.approval_status = "approved"
+            audit("ipam.allocation.updated", "allocation", allocation.id, {"before": before, "after": {"prefix": allocation.prefix, "scope": allocation.scope, "status": allocation.status}})
+            return _commit_or_flash("Recurso IPAM atualizado.", "panel.ipam")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um recurso IPAM com esse tipo e prefixo.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template("ipam/allocation_form.html", **_ipam_allocation_form_context(allocation))
+
+
+@bp.post("/ipam/allocations/<int:allocation_id>/delete")
+@application_required("ipam_geofeed")
+@roles_required("admin", "editor")
+def ipam_allocation_delete(allocation_id: int):
+    allocation = db.get_or_404(IpamAllocation, allocation_id)
+    if allocation.children:
+        flash("Este recurso possui dependências derivadas. Desative ou realoque os filhos antes de desativá-lo.", "error")
+        return redirect(url_for("panel.ipam"))
+    if allocation.approval_status == "pending":
+        flash("Aguarde a revisão da solicitação pendente antes de desativar este recurso.", "error")
+        return redirect(url_for("panel.ipam"))
+    if allocation.scope == "public":
+        if not current_user().has_permission("ipam.public.submit"):
+            abort(403)
+        values = {
+            key: getattr(allocation, key)
+            for key in (
+                "resource_kind", "prefix", "scope", "status", "parent_prefix", "parent_id",
+                "company_id", "allocation_address", "latitude", "longitude", "vlan", "vrf",
+                "description", "notes", "source_block_id", "customer_id", "pop_id", "pop_2_id",
+                "access_type", "access_type_2", "router_id", "router_2_id", "switch_id", "switch_2_id",
+                "cpe_id", "access_point_id", "access_point_2_id", "st_id", "st_2_id",
+            )
+        }
+        values["status"] = "decommissioned"
+        try:
+            _submit_ipam_approval(allocation, values, "deactivate", _clean(request.form.get("notes"), 4000))
+            audit("ipam.allocation.deactivation_submitted", "allocation", allocation.id, {"prefix": allocation.prefix})
+            return _commit_or_flash("Desativação do recurso público enviada para aprovação.", "panel.ipam")
+        except ValueError as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+            return redirect(url_for("panel.ipam"))
+    if not current_user().has_permission("ipam.private.manage"):
+        abort(403)
+    allocation.status = "decommissioned"
+    audit("ipam.allocation.deactivated", "allocation", allocation.id, {"prefix": allocation.prefix, "scope": allocation.scope})
+    return _commit_or_flash("Recurso IPAM desativado. O histórico e os vínculos foram preservados.", "panel.ipam")
+
+
+@bp.route("/ipam/customers/new", methods=["GET", "POST"])
+@bp.route("/customers/new", methods=["GET", "POST"])
+@permission_required("catalog.customers.manage")
+def ipam_customer_new():
+    if request.method == "POST":
+        try:
+            values = _customer_values()
+            services = values.pop("services")
+            service_statuses = values.pop("service_statuses")
+            customer = Customer(**values)
+            customer.services = services
+            db.session.add(customer)
+            db.session.flush()
+            _apply_customer_service_statuses(customer, service_statuses)
+            audit("customer.created", "customer", customer.id, {"name": customer.name})
+            return _commit_or_flash("Cliente cadastrado no Admin Center.", "panel.customers")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um cliente com esses dados.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template("customer_form.html", customer=None, services=ServiceCatalogItem.query.filter_by(active=True).order_by(ServiceCatalogItem.name).all(), service_statuses={})
+
+
+@bp.route("/ipam/customers/<int:customer_id>/edit", methods=["GET", "POST"])
+@bp.route("/customers/<int:customer_id>/edit", methods=["GET", "POST"])
+@permission_required("catalog.customers.manage")
+def ipam_customer_edit(customer_id: int):
+    customer = db.get_or_404(Customer, customer_id)
+    if request.method == "POST":
+        try:
+            before = {"name": customer.name, "cnpj": customer.cnpj, "services": [item.name for item in customer.services]}
+            values = _customer_values(customer)
+            service_statuses = values.pop("service_statuses")
+            values.pop("services", None)
+            _apply_customer_service_statuses(customer, service_statuses)
+            audit("customer.updated", "customer", customer.id, {"before": before, "after": {"name": customer.name, "cnpj": customer.cnpj, "services": [item.name for item in customer.services]}})
+            return _commit_or_flash("Cliente atualizado no Admin Center.", "panel.customers")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um cliente com esses dados.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template("customer_form.html", customer=customer, services=ServiceCatalogItem.query.order_by(ServiceCatalogItem.name).all(), service_statuses=_customer_service_statuses(customer))
+
+
+@bp.post("/ipam/customers/<int:customer_id>/delete")
+@bp.post("/customers/<int:customer_id>/delete")
+@permission_required("catalog.customers.manage")
+def ipam_customer_delete(customer_id: int):
+    customer = db.get_or_404(Customer, customer_id)
+    customer.active = False
+    audit("customer.deactivated", "customer", customer.id, {"name": customer.name})
+    return _commit_or_flash("Cliente desativado no Admin Center.", "panel.customers")
+
+
+@bp.route("/ipam/pops/new", methods=["GET", "POST"])
+@bp.route("/pops-dcs/new", methods=["GET", "POST"])
+@permission_required("catalog.pops.manage")
+def ipam_pop_new():
+    if request.method == "POST":
+        try:
+            values = _pop_dc_values()
+            windows = values.pop("access_windows")
+            pop = PopDc(**values)
+            pop.access_windows = [PopAccessWindow(**window) for window in windows]
+            db.session.add(pop)
+            db.session.flush()
+            audit("pop_dc.created", "pop_dc", pop.id, {"code": pop.code, "name": pop.name})
+            result_name = request.args.get("result_name") or request.form.get("result_name")
+            if result_name:
+                db.session.commit()
+                return redirect(url_for("panel.ipam", tab="public", pop_created=pop.id, pop_name=pop.name))
+            return _commit_or_flash("POP/DC cadastrado no Admin Center.", "panel.pops_dcs")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um POP com esse código.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template(
+        "pop_dc_form.html", pop=None, weekdays=WEEKDAYS,
+        battery_max_minutes=BATTERY_MAX_MINUTES,
+        edge_routers=IpamEquipment.query.filter_by(active=True, equipment_type="edge_router").order_by(IpamEquipment.name).all(),
+    )
+
+
+@bp.route("/ipam/pops/<int:pop_id>/edit", methods=["GET", "POST"])
+@bp.route("/pops-dcs/<int:pop_id>/edit", methods=["GET", "POST"])
+@permission_required("catalog.pops.manage")
+def ipam_pop_edit(pop_id: int):
+    pop = db.get_or_404(PopDc, pop_id)
+    if request.method == "POST":
+        try:
+            before = {"code": pop.code, "access_24h": pop.access_24h, "battery_autonomy_minutes": pop.battery_autonomy_minutes}
+            _pop_dc_values(pop)
+            audit("pop_dc.updated", "pop_dc", pop.id, {"before": before, "after": {"code": pop.code, "access_24h": pop.access_24h, "battery_autonomy_minutes": pop.battery_autonomy_minutes}})
+            return _commit_or_flash("POP/DC atualizado no Admin Center.", "panel.pops_dcs")
+        except IntegrityError:
+            db.session.rollback()
+            flash("Já existe um POP com esse código.", "error")
+        except (ValueError, TypeError) as exc:
+            db.session.rollback()
+            flash(str(exc), "error")
+    return render_template(
+        "pop_dc_form.html", pop=pop, weekdays=WEEKDAYS,
+        battery_max_minutes=BATTERY_MAX_MINUTES,
+        edge_routers=IpamEquipment.query.filter_by(active=True, equipment_type="edge_router").order_by(IpamEquipment.name).all(),
+    )
+
+
+@bp.post("/ipam/pops/<int:pop_id>/delete")
+@bp.post("/pops-dcs/<int:pop_id>/delete")
+@permission_required("catalog.pops.manage")
+def ipam_pop_delete(pop_id: int):
+    pop = db.get_or_404(PopDc, pop_id)
+    pop.active = False
+    audit("pop_dc.deactivated", "pop_dc", pop.id, {"code": pop.code, "name": pop.name})
+    return _commit_or_flash("POP/DC desativado no Admin Center.", "panel.pops_dcs")
 
 
 @bp.get("/users/online")
@@ -522,69 +2531,56 @@ def running_scans():
 
 @bp.get("/companies")
 @login_required
+@permission_required("catalog.companies.view")
 def companies():
     search = _clean(request.args.get("q"), 120)
     query = Company.query
     if search:
-        query = query.filter(Company.name.ilike(f"%{search}%"))
+        query = query.filter(or_(Company.name.ilike(f"%{search}%"), Company.cnpj.ilike(f"%{search}%"), Company.address.ilike(f"%{search}%")))
     return render_template(
         "companies.html", companies=query.order_by(Company.name).all(), search=search
     )
 
 
 @bp.route("/companies/new", methods=["GET", "POST"])
-@roles_required("admin")
+@permission_required("catalog.companies.manage")
 def company_new():
     if request.method == "POST":
         try:
-            company = Company(
-                name=_clean(request.form.get("name"), 120),
-                default_asn=_integer(request.form.get("default_asn"), "ASN"),
-                contact_email=_email(request.form.get("contact_email", ""), required=False),
-                active=True,
-            )
-            if not company.name:
-                raise ValueError("O nome é obrigatório.")
+            company = Company(**_company_values())
             db.session.add(company)
             db.session.flush()
             audit("company.created", "company", company.id, {"name": company.name})
             return _commit_or_flash("Empresa cadastrada.", "panel.companies")
-        except ValueError as exc:
+        except (ValueError, TypeError, IntegrityError) as exc:
             db.session.rollback()
-            flash(str(exc), "error")
+            flash("Já existe uma empresa com esse CNPJ ou os dados informados são inválidos." if isinstance(exc, IntegrityError) else str(exc), "error")
     return render_template("company_form.html", company=None)
 
 
 @bp.route("/companies/<int:company_id>/edit", methods=["GET", "POST"])
-@roles_required("admin")
+@permission_required("catalog.companies.manage")
 def company_edit(company_id: int):
     company = db.get_or_404(Company, company_id)
     if request.method == "POST":
         try:
-            before = {"name": company.name, "asn": company.default_asn}
-            company.name = _clean(request.form.get("name"), 120)
-            company.default_asn = _integer(request.form.get("default_asn"), "ASN")
-            company.contact_email = _email(
-                request.form.get("contact_email", ""), required=False
-            )
-            company.active = request.form.get("active") == "on"
-            if not company.name:
-                raise ValueError("O nome é obrigatório.")
+            before = {"name": company.name, "cnpj": company.cnpj, "asn": company.default_asn}
+            _company_values(company)
             audit(
                 "company.updated",
                 "company",
                 company.id,
-                {"before": before, "after": {"name": company.name, "asn": company.default_asn}},
+                {"before": before, "after": {"name": company.name, "cnpj": company.cnpj, "asn": company.default_asn}},
             )
             return _commit_or_flash("Empresa atualizada.", "panel.companies")
-        except ValueError as exc:
+        except (ValueError, TypeError, IntegrityError) as exc:
             db.session.rollback()
-            flash(str(exc), "error")
+            flash("Já existe uma empresa com esse CNPJ ou os dados informados são inválidos." if isinstance(exc, IntegrityError) else str(exc), "error")
     return render_template("company_form.html", company=company)
 
 
 @bp.route("/companies/<int:company_id>/delete", methods=["GET", "POST"])
-@roles_required("admin")
+@permission_required("catalog.companies.manage")
 def company_delete(company_id: int):
     company = db.get_or_404(Company, company_id)
     blocks = list(company.blocks)
@@ -599,20 +2595,20 @@ def company_delete(company_id: int):
     if request.method == "POST":
         if request.form.get("confirm") != "yes":
             abort(400)
+        company.active = False
         audit(
-            "company.deleted",
+            "company.deactivated",
             "company",
             company.id,
             {"name": company.name, "blocks": [block.cidr for block in blocks], "entries": entries},
             user=current_user(),
         )
-        db.session.delete(company)
-        return _commit_or_flash("Empresa e dados associados excluídos.", "panel.companies")
+        return _commit_or_flash("Empresa desativada. Blocos, histórico e vínculos foram preservados.", "panel.companies")
     return render_template(
         "delete_confirm.html",
         title="Excluir empresa",
         heading=f"Excluir {company.name}?",
-        message="Esta ação permanente removerá os dados ativos associados à empresa.",
+        message="A empresa será desativada. Blocos, histórico e auditoria permanecerão preservados.",
         consequences=consequences,
         cancel_endpoint="panel.companies",
         cancel_values={},
@@ -620,34 +2616,16 @@ def company_delete(company_id: int):
 
 
 @bp.get("/blocks")
+@application_required("ipam_geofeed")
 @login_required
 def blocks():
-    search = _clean(request.args.get("q"), 120)
-    family = request.args.get("family", "all")
-    query = NetworkBlock.query.join(Company)
-    if search:
-        query = query.filter(
-            or_(
-                NetworkBlock.cidr.ilike(f"%{search}%"),
-                NetworkBlock.filename.ilike(f"%{search}%"),
-                Company.name.ilike(f"%{search}%"),
-            )
-        )
-    if family in {"4", "6"}:
-        query = query.filter(NetworkBlock.ip_version == int(family))
-    block_list = query.order_by(NetworkBlock.ip_version, NetworkBlock.cidr).all()
-    block_reviews = {block.id: _block_review(block) for block in block_list}
-    return render_template(
-        "blocks.html",
-        blocks=block_list,
-        companies=Company.query.filter_by(active=True).order_by(Company.name).all(),
-        search=search,
-        family=family,
-        block_reviews=block_reviews,
-    )
+    # The former Blocks screen is now a compatibility alias.  The unified
+    # IPAM inventory is the only place where a block or address is registered.
+    return ipam()
 
 
 @bp.get("/blocks/review")
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def block_review():
     reviewed = [(block, _block_review(block)) for block in NetworkBlock.query.join(Company).order_by(NetworkBlock.cidr).all()]
@@ -655,6 +2633,7 @@ def block_review():
 
 
 @bp.post("/blocks/bulk-update")
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def blocks_bulk_update():
     try:
@@ -702,7 +2681,7 @@ def blocks_bulk_update():
 
     try:
         _require_change_confirmation()
-        if current_user().role == "editor":
+        if not current_user().has_permission("approvals.review"):
             change = _propose_editor_mutation(
                 f"Atualização em massa de {len(blocks_list)} bloco(s)", notes, mutation
             )
@@ -723,6 +2702,7 @@ def blocks_bulk_update():
 
 
 @bp.post("/entries/bulk-update")
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def entries_bulk_update():
     try:
@@ -752,7 +2732,7 @@ def entries_bulk_update():
 
     try:
         _require_change_confirmation()
-        if current_user().role == "editor":
+        if not current_user().has_permission("approvals.review"):
             change = _propose_editor_mutation(
                 f"Atualização em massa de {len(entries)} entrada(s)", notes, mutation
             )
@@ -777,8 +2757,11 @@ def entries_bulk_update():
 
 
 @bp.route("/blocks/new", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def block_new():
+    if request.method == "GET":
+        return redirect(url_for("panel.ipam_allocation_new", resource_kind="block"))
     companies_list = Company.query.filter_by(active=True).order_by(Company.name).all()
     if request.method == "POST":
         try:
@@ -790,7 +2773,7 @@ def block_new():
             asn = _integer(request.form.get("asn"), "ASN")
             filename = _clean(request.form.get("filename"), 128).lower()
             description = _clean(request.form.get("description"), 255)
-            if current_user().role == "editor":
+            if not current_user().has_permission("approvals.review"):
                 notes = _clean(request.form.get("notes"), 4000)
 
                 def mutation():
@@ -842,6 +2825,7 @@ def block_new():
 
 
 @bp.route("/blocks/<int:block_id>/edit", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def block_edit(block_id: int):
     block = db.get_or_404(NetworkBlock, block_id)
@@ -860,7 +2844,7 @@ def block_edit(block_id: int):
             filename = _clean(request.form.get("filename"), 128).lower()
             description = _clean(request.form.get("description"), 255)
             active = request.form.get("active") == "on"
-            if current_user().role == "editor":
+            if not current_user().has_permission("approvals.review"):
                 notes = _clean(request.form.get("notes"), 4000)
 
                 def mutation():
@@ -909,6 +2893,7 @@ def block_edit(block_id: int):
 
 
 @bp.route("/blocks/<int:block_id>/delete", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
 @roles_required("admin")
 def block_delete(block_id: int):
     block = db.get_or_404(NetworkBlock, block_id)
@@ -944,6 +2929,7 @@ def block_delete(block_id: int):
 
 
 @bp.get("/blocks/<int:block_id>")
+@application_required("ipam_geofeed")
 @login_required
 def block_detail(block_id: int):
     block = db.get_or_404(NetworkBlock, block_id)
@@ -951,6 +2937,7 @@ def block_detail(block_id: int):
 
 
 @bp.get("/blocks/<int:block_id>/preview.csv")
+@application_required("ipam_geofeed")
 @login_required
 def block_preview_csv(block_id: int):
     block = db.get_or_404(NetworkBlock, block_id)
@@ -970,6 +2957,7 @@ def block_preview_csv(block_id: int):
 
 
 @bp.get("/working/geofeeds.zip")
+@application_required("ipam_geofeed")
 @login_required
 def working_zip():
     snapshot = build_snapshot()
@@ -993,10 +2981,11 @@ def working_zip():
 
 
 @bp.post("/blocks/<int:block_id>/toggle")
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def block_toggle(block_id: int):
     block = db.get_or_404(NetworkBlock, block_id)
-    if current_user().role == "editor":
+    if not current_user().has_permission("approvals.review"):
         notes = _clean(request.form.get("notes"), 4000)
 
         def mutation():
@@ -1020,12 +3009,13 @@ def block_toggle(block_id: int):
 
 
 @bp.route("/blocks/<int:block_id>/entries/new", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def entry_new(block_id: int):
     block = db.get_or_404(NetworkBlock, block_id)
     if request.method == "POST":
         try:
-            if current_user().role == "editor":
+            if not current_user().has_permission("approvals.review"):
                 notes = _clean(request.form.get("notes"), 4000)
 
                 def mutation():
@@ -1073,6 +3063,7 @@ def _fill_entry(entry: FeedEntry, form) -> None:
 
 
 @bp.route("/entries/<int:entry_id>/edit", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def entry_edit(entry_id: int):
     entry = db.get_or_404(FeedEntry, entry_id)
@@ -1081,7 +3072,7 @@ def entry_edit(entry_id: int):
         try:
             _require_change_confirmation()
             before = entry.prefix
-            if current_user().role == "editor":
+            if not current_user().has_permission("approvals.review"):
                 notes = _clean(request.form.get("notes"), 4000)
 
                 def mutation():
@@ -1117,11 +3108,12 @@ def entry_edit(entry_id: int):
 
 
 @bp.post("/entries/<int:entry_id>/delete")
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 def entry_delete(entry_id: int):
     entry = db.get_or_404(FeedEntry, entry_id)
     block_id, prefix = entry.block_id, entry.prefix
-    if current_user().role == "editor":
+    if not current_user().has_permission("approvals.review"):
         notes = _clean(request.form.get("notes"), 4000)
 
         def mutation():
@@ -1147,6 +3139,7 @@ def entry_delete(entry_id: int):
 
 
 @bp.post("/blocks/<int:block_id>/rdap-check")
+@application_required("ipam_geofeed")
 @roles_required("admin", "editor")
 @limiter.limit("30 per hour")
 def block_rdap(block_id: int):
@@ -1166,7 +3159,7 @@ def block_rdap(block_id: int):
 
 
 @bp.get("/users")
-@roles_required("admin")
+@roles_required("super_admin")
 def users():
     return render_template(
         "users.html",
@@ -1186,19 +3179,18 @@ def access():
         except json.JSONDecodeError:
             role_permissions[role.code] = []
     return render_template("access.html", roles=role_list, role_permissions=role_permissions,
-        sectors=Sector.query.order_by(Sector.active.desc(), Sector.name).all(), permission_options=PERMISSION_OPTIONS)
+        sectors=Sector.query.order_by(Sector.active.desc(), Sector.name).all(),
+        groups=Group.query.filter_by(active=True).order_by(Group.name).all(),
+        users=User.query.filter(User.deleted_at.is_(None)).order_by(User.email).all(),
+        permission_options=PERMISSION_OPTIONS)
 
 
 @bp.get("/access/applications")
 @roles_required("super_admin")
 def application_access():
-    applications = Application.query.filter_by(active=True).order_by(Application.sort_order, Application.name).all()
-    return render_template(
-        "application_access.html",
-        applications=applications,
-        groups=Group.query.filter_by(active=True).order_by(Group.name).all(),
-        users=User.query.filter(User.deleted_at.is_(None), User.active.is_(True)).order_by(User.email).all(),
-    )
+    # Kept as a compatibility endpoint for old bookmarks. Application access
+    # is now defined by the user's profile, never by grants.
+    return redirect(url_for("panel.access"))
 
 
 @bp.get("/sso/issue")
@@ -1213,14 +3205,26 @@ def issue_sso():
     secret = current_app.config.get("SSO_SIGNING_SECRET", "")
     if not secret:
         abort(503)
+    next_path = ""
+    raw_scan_id = request.args.get("scan_id", "").strip()
+    if raw_scan_id:
+        if not raw_scan_id.isdigit() or int(raw_scan_id) <= 0:
+            abort(400)
+        next_path = f"/scans/{int(raw_scan_id)}"
     token = issue_handoff(
         secret,
         subject=str(user.id),
         email=user.email,
         display_name=user.display_name or user.email,
         role=user.role,
-        applications=[target],
+        profile=user.role,
+        applications=[
+            application.code
+            for application in Application.query.filter_by(active=True).all()
+            if application.public or user.has_application_access(application.code)
+        ],
         audience=target,
+        next_path=next_path,
     )
     callback = f"{current_app.config['HEALTH_BASE_URL'].rstrip('/')}/sso/callback"
     return redirect(f"{callback}?{urlencode({'token': token})}")
@@ -1233,15 +3237,15 @@ def group_create():
     description = _clean(request.form.get("description"), 255)
     if not name:
         flash("Informe o nome do grupo.", "error")
-        return redirect(url_for("panel.application_access"))
+        return redirect(url_for("panel.access"))
     if Group.query.filter(func.lower(Group.name) == name.casefold()).first():
         flash("Este grupo já está cadastrado.", "error")
-        return redirect(url_for("panel.application_access"))
+        return redirect(url_for("panel.access"))
     group = Group(name=name, description=description, active=True)
     db.session.add(group)
     db.session.flush()
     audit("group.created", "group", group.id, {"name": name}, user=current_user())
-    return _commit_or_flash("Grupo criado.", "panel.application_access")
+    return _commit_or_flash("Grupo criado.", "panel.access")
 
 
 @bp.post("/access/groups/<int:group_id>/members")
@@ -1254,45 +3258,17 @@ def group_members_update(group_id: int):
             user_ids.add(int(value))
         except ValueError:
             continue
-    group.users = User.query.filter(User.id.in_(user_ids), User.active.is_(True), User.deleted_at.is_(None)).all() if user_ids else []
+    selected_users = User.query.filter(User.id.in_(user_ids), User.active.is_(True), User.deleted_at.is_(None)).all() if user_ids else []
+    conflicts = [
+        user.email for user in selected_users
+        if any(member_group.id != group.id and member_group.active for member_group in user.groups)
+    ]
+    if conflicts:
+        flash(f"Cada usuário pode pertencer a apenas um grupo. Remova primeiro: {', '.join(conflicts[:4])}.", "error")
+        return redirect(url_for("panel.access"))
+    group.users = selected_users
     audit("group.members_updated", "group", group.id, {"user_ids": sorted(user_ids)}, user=current_user())
-    return _commit_or_flash("Membros do grupo atualizados.", "panel.application_access")
-
-
-@bp.post("/access/applications/users/<int:user_id>")
-@roles_required("super_admin")
-def user_application_access_update(user_id: int):
-    user = db.get_or_404(User, user_id)
-    applications = Application.query.filter_by(active=True, public=False).all()
-    for application in applications:
-        value = request.form.get(f"application_{application.code}", "inherit")
-        grant = UserApplicationGrant.query.filter_by(user_id=user.id, application_id=application.id).first()
-        if value == "inherit":
-            if grant:
-                db.session.delete(grant)
-        elif value in {"allow", "deny"}:
-            if not grant:
-                grant = UserApplicationGrant(user_id=user.id, application_id=application.id)
-                db.session.add(grant)
-            grant.allowed = value == "allow"
-    audit("user.application_access_updated", "user", user.id, {"applications": request.form.to_dict()}, user=current_user())
-    return _commit_or_flash("Acesso individual às aplicações atualizado.", "panel.application_access")
-
-
-@bp.post("/access/applications/groups/<int:group_id>")
-@roles_required("super_admin")
-def group_application_access_update(group_id: int):
-    group = db.get_or_404(Group, group_id)
-    selected = set(request.form.getlist("application_codes"))
-    applications = Application.query.filter_by(active=True, public=False).all()
-    for application in applications:
-        grant = GroupApplicationGrant.query.filter_by(group_id=group.id, application_id=application.id).first()
-        if application.code in selected and not grant:
-            db.session.add(GroupApplicationGrant(group_id=group.id, application_id=application.id, allowed=True))
-        elif application.code not in selected and grant:
-            db.session.delete(grant)
-    audit("group.application_access_updated", "group", group.id, {"applications": sorted(selected)}, user=current_user())
-    return _commit_or_flash("Acesso do grupo às aplicações atualizado.", "panel.application_access")
+    return _commit_or_flash("Membros do grupo atualizados.", "panel.access")
 
 
 @bp.post("/access/sectors")
@@ -1748,7 +3724,7 @@ def user_new():
     temporary_password = None
     if request.method == "POST":
         try:
-            role = request.form.get("role", "editor")
+            role = request.form.get("role", "ipam_operator")
             if not Role.query.filter_by(code=role, active=True).first():
                 raise ValueError("Perfil inválido.")
             auth_type = request.form.get("auth_type", "m365")
@@ -1831,7 +3807,7 @@ def user_edit(user_id: int):
             selected_role = Role.query.filter_by(code=role, active=True).first()
             if not selected_role:
                 raise ValueError("Perfil inválido.")
-            if user.role in {"super_admin", "admin", "editor"} and not selected_role.system:
+            if user.role in {"super_admin", "admin", "ipam_operator", "health_operator", "viewer"} and not selected_role.system:
                 raise ValueError("Perfis padrão não podem ser convertidos diretamente em perfil personalizado.")
             active = request.form.get("active") == "on"
             if user.role in {"super_admin", "admin"} and (role not in {"super_admin", "admin"} or not active):
@@ -2024,11 +4000,104 @@ def profile_edit():
 
 
 @bp.get("/changes")
+@application_required("ipam_geofeed")
 @login_required
 def changes():
     return render_template(
-        "changes.html", changes=ChangeRequest.query.order_by(ChangeRequest.created_at.desc()).all()
+        "changes.html",
+        changes=ChangeRequest.query.order_by(ChangeRequest.created_at.desc()).all(),
+        ipam_approvals=IpamApprovalRequest.query.order_by(IpamApprovalRequest.created_at.desc()).all(),
     )
+
+
+def _require_ipam_approval_view(approval: IpamApprovalRequest) -> None:
+    user = current_user()
+    if user.id != approval.requested_by_id and not user.has_permission("ipam.public.approve"):
+        abort(403)
+
+
+@bp.get("/ipam/approvals/<int:approval_id>")
+@application_required("ipam_geofeed")
+@login_required
+def ipam_approval_detail(approval_id: int):
+    approval = db.get_or_404(IpamApprovalRequest, approval_id)
+    _require_ipam_approval_view(approval)
+    return render_template(
+        "ipam/approval_detail.html",
+        approval=approval,
+        snapshot=json.loads(approval.snapshot_json),
+    )
+
+
+@bp.post("/ipam/approvals/<int:approval_id>/approve")
+@application_required("ipam_geofeed")
+@permission_required("ipam.public.approve")
+def ipam_approval_approve(approval_id: int):
+    approval = db.get_or_404(IpamApprovalRequest, approval_id)
+    if approval.status != "pending":
+        abort(409)
+    if approval.requested_by_id == current_user().id:
+        flash("O autor não pode aprovar a própria solicitação.", "error")
+        return redirect(url_for("panel.ipam_approval_detail", approval_id=approval.id))
+    try:
+        snapshot = json.loads(approval.snapshot_json)
+        _ipam_check_overlap(snapshot, approval.allocation_id)
+        _ipam_apply_values(approval.allocation, snapshot)
+        approval.allocation.approval_status = "approved"
+        approval.status = "approved"
+        approval.reviewed_by_id = current_user().id
+        approval.reviewed_at = utcnow()
+        approval.review_notes = _clean(request.form.get("review_notes"), 4000)
+        audit("ipam.approval.approved", "ipam_approval", approval.id, {"allocation_id": approval.allocation_id})
+        db.session.commit()
+        create_in_app_notifications(
+            [approval.requested_by],
+            f"Solicitação IPAM #{approval.id} aprovada",
+            f"O recurso {approval.allocation.prefix} foi aprovado.",
+            url_for("panel.ipam_approval_detail", approval_id=approval.id),
+        )
+        flash("Solicitação IPAM aprovada.", "success")
+    except (ValueError, TypeError, json.JSONDecodeError) as exc:
+        db.session.rollback()
+        flash(f"Não foi possível aprovar a solicitação: {exc}", "error")
+    return redirect(url_for("panel.ipam_approval_detail", approval_id=approval.id))
+
+
+@bp.post("/ipam/approvals/<int:approval_id>/reject")
+@application_required("ipam_geofeed")
+@permission_required("ipam.public.reject")
+def ipam_approval_reject(approval_id: int):
+    approval = db.get_or_404(IpamApprovalRequest, approval_id)
+    if approval.status != "pending":
+        abort(409)
+    if approval.requested_by_id == current_user().id:
+        flash("O autor não pode rejeitar a própria solicitação.", "error")
+        return redirect(url_for("panel.ipam_approval_detail", approval_id=approval.id))
+    reason = _clean(request.form.get("review_notes"), 4000)
+    if not reason:
+        flash("Informe o motivo da rejeição.", "error")
+        return redirect(url_for("panel.ipam_approval_detail", approval_id=approval.id))
+    approval.status = "rejected"
+    approval.reviewed_by_id = current_user().id
+    approval.reviewed_at = utcnow()
+    approval.review_notes = reason
+    if approval.operation == "create":
+        # Keep the rejected request and its resource as an auditable record;
+        # the decommissioned state prevents it from being used or counted.
+        approval.allocation.status = "decommissioned"
+        approval.allocation.approval_status = "rejected"
+    else:
+        approval.allocation.approval_status = "approved"
+    audit("ipam.approval.rejected", "ipam_approval", approval.id, {"allocation_id": approval.allocation_id})
+    db.session.commit()
+    create_in_app_notifications(
+        [approval.requested_by],
+        f"Solicitação IPAM #{approval.id} rejeitada",
+        reason,
+        url_for("panel.ipam_approval_detail", approval_id=approval.id),
+    )
+    flash("Solicitação IPAM rejeitada.", "success")
+    return redirect(url_for("panel.ipam_approval_detail", approval_id=approval.id))
 
 
 @bp.get("/notifications")
@@ -2106,6 +4175,7 @@ def dicebear_preview():
 
 
 @bp.route("/changes/submit", methods=["GET", "POST"])
+@application_required("ipam_geofeed")
 @login_required
 def change_submit():
     if request.method == "POST":
@@ -2132,6 +4202,7 @@ def change_submit():
 
 
 @bp.get("/changes/<int:change_id>")
+@application_required("ipam_geofeed")
 @login_required
 def change_detail(change_id: int):
     change = db.get_or_404(ChangeRequest, change_id)
@@ -2140,6 +4211,7 @@ def change_detail(change_id: int):
 
 
 @bp.post("/changes/<int:change_id>/approve")
+@application_required("ipam_geofeed")
 @roles_required("admin")
 def change_approve(change_id: int):
     change = db.get_or_404(ChangeRequest, change_id)
@@ -2209,6 +4281,7 @@ def change_approve(change_id: int):
 
 
 @bp.post("/changes/<int:change_id>/reject")
+@application_required("ipam_geofeed")
 @roles_required("admin")
 def change_reject(change_id: int):
     change = db.get_or_404(ChangeRequest, change_id)
@@ -2242,6 +4315,7 @@ def change_reject(change_id: int):
 
 
 @bp.get("/history")
+@application_required("ipam_geofeed")
 @login_required
 def history():
     return render_template(
@@ -2250,6 +4324,7 @@ def history():
 
 
 @bp.get("/history/<int:publication_id>")
+@application_required("ipam_geofeed")
 @login_required
 def history_detail(publication_id: int):
     publication = db.get_or_404(Publication, publication_id)
@@ -2267,6 +4342,7 @@ def history_detail(publication_id: int):
 
 
 @bp.post("/history/<int:publication_id>/restore")
+@application_required("ipam_geofeed")
 @roles_required("admin")
 def history_restore(publication_id: int):
     publication = db.get_or_404(Publication, publication_id)
@@ -2286,7 +4362,20 @@ def audit_logs():
     search = _clean(request.args.get("q"), 120)
     date_from = _clean(request.args.get("date_from"), 10)
     date_to = _clean(request.args.get("date_to"), 10)
+    application = _clean(request.args.get("application"), 64)
+    if application not in IPAM_AUDIT_APPLICATIONS:
+        application = ""
     query = AuditLog.query.outerjoin(User)
+    prefixes = {
+        "admin_center": ("auth.", "user.", "group.", "role.", "theme.", "settings.", "profile.", "sector.", "function.", "setup.", "company.", "customer.", "pop_dc.", "service."),
+        "ipam_geofeed": ("ipam.", "block.", "entry.", "change.", "publication.", "geofeed."),
+        "geofeed_public": ("public.",),
+        "isp_network_health": ("scan.", "health.", "monitoring."),
+    }
+    if application == "isp_network_health":
+        query = query.filter(AuditLog.id == -1)
+    elif application:
+        query = query.filter(or_(*[AuditLog.action.ilike(f"{prefix}%") for prefix in prefixes[application]]))
     if search:
         query = query.filter(
             or_(
@@ -2305,8 +4394,39 @@ def audit_logs():
     except ValueError:
         flash("Período inválido; o filtro de data foi ignorado.", "warning")
     logs = query.order_by(AuditLog.created_at.desc()).limit(500).all()
+    if not application or application == "isp_network_health":
+        health_logs = _fetch_health_audit_logs()
+        if search:
+            term = search.casefold()
+            health_logs = [
+                log for log in health_logs
+                if term in " ".join(
+                    str(getattr(log, field, ""))
+                    for field in ("action", "entity_type", "entity_id", "details")
+                ).casefold()
+                or term in str(getattr(getattr(log, "user", None), "email", "")).casefold()
+            ]
+        if date_from or date_to:
+            try:
+                lower = datetime.fromisoformat(date_from) if date_from else None
+                upper = datetime.fromisoformat(date_to).replace(hour=23, minute=59, second=59) if date_to else None
+                health_logs = [
+                    log for log in health_logs
+                    if (lower is None or log.created_at.replace(tzinfo=None) >= lower)
+                    and (upper is None or log.created_at.replace(tzinfo=None) <= upper)
+                ]
+            except ValueError:
+                pass
+        logs = sorted(logs + health_logs, key=lambda log: log.created_at, reverse=True)[:500]
     return render_template(
-        "audit.html", logs=logs, search=search, date_from=date_from, date_to=date_to
+        "audit.html",
+        logs=logs,
+        search=search,
+        date_from=date_from,
+        date_to=date_to,
+        application=application,
+        application_options=IPAM_AUDIT_APPLICATIONS,
+        audit_application=_audit_application,
     )
 
 

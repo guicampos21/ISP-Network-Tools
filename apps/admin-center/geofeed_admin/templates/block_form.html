@@ -2,7 +2,7 @@
 {% block title %}{{ 'Editar bloco' if block else 'Novo bloco' }}{% endblock %}
 {% block content %}
 <div class="page-heading"><div><p class="eyebrow">Blocos</p><h1>{{ 'Editar bloco' if block else 'Novo bloco' }}</h1></div><a class="button button-secondary" href="{{ url_for('panel.blocks') }}">Voltar</a></div>
-<form class="card form-card" method="post"{% if block %} data-change-review data-change-kind="bloco" data-change-action="{{ 'Enviar para aprovação' if current_user.role == 'editor' else 'Confirmar e publicar' }}"{% endif %}>
+<form class="card form-card" method="post"{% if block %} data-change-review data-change-kind="bloco" data-change-action="{{ 'Enviar para aprovação' if not current_user.has_permission('approvals.review') else 'Confirmar e publicar' }}"{% endif %}>
   <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   {% if block %}<input type="hidden" name="confirm_changes" value="">{% endif %}
   <div class="form-grid">
@@ -14,7 +14,7 @@
     {% if block %}<label class="check"><input type="checkbox" name="active" {% if block.active %}checked{% endif %}><span>Bloco ativo e publicável</span></label>{% endif %}
   </div>
   {% if suggested_cidr %}<div class="subnet-suggestion" data-subnet-suggestion role="alert"><strong>Sub-rede sugerida</strong><p>O endereço informado não é o início correto desta sub-rede. A sub-rede correta para este cadastro seria <span class="mono">{{ suggested_cidr }}</span>. Deseja aplicar a sub-rede sugerida?</p><div class="form-actions"><button class="button button-primary" type="submit" name="accept_suggested_cidr" value="yes">Sim, aplicar</button><button class="button button-secondary" type="button" data-dismiss-suggestion>Não, vou corrigir</button></div></div>{% endif %}
-  {% if current_user.role == 'editor' %}<label><span>Observação para o administrador *</span><textarea name="notes" maxlength="4000" rows="4" required placeholder="Descreva o motivo desta alteração.">{{ request.form.get('notes', '') }}</textarea><small>O bloco será enviado para aprovação e não alterará o rascunho até ser aprovado.</small></label>{% endif %}
+  {% if not current_user.has_permission('approvals.review') %}<label><span>Observação para o administrador *</span><textarea name="notes" maxlength="4000" rows="4" required placeholder="Descreva o motivo desta alteração.">{{ request.form.get('notes', '') }}</textarea><small>O bloco será enviado para aprovação e não alterará o rascunho até ser aprovado.</small></label>{% endif %}
   <div class="form-actions"><button class="button button-primary" type="submit">{{ 'Revisar alteração' if block else 'Salvar rascunho' }}</button></div>
 </form>
 {% endblock %}

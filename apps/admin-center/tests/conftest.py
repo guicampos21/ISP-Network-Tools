@@ -35,7 +35,7 @@ def app(tmp_path: Path):
     with app.app_context():
         db.create_all()
         admin = User(email="admin@example.test", display_name="Admin", role="admin", active=True)
-        editor = User(email="editor@example.test", display_name="Editor", role="editor", active=True)
+        editor = User(email="editor@example.test", display_name="Editor", role="ipam_operator", active=True)
         viewer = User(email="viewer@example.test", display_name="Viewer", role="viewer", active=True)
         db.session.add_all([admin, editor, viewer])
         company = Company(name="Example ISP", default_asn=265264, active=True)

@@ -3,7 +3,8 @@
 ISP Network Tools é uma suíte white label para operações de provedores de internet. O portal abre no Geofeed público e oferece um lançador para as aplicações protegidas:
 
 - **Geofeed público:** feed aprovado e downloads públicos;
-- **Admin Center:** administração do Geofeed, usuários, grupos, permissões, aprovações, publicação, auditoria e identidade visual;
+- **Admin Center:** visão geral, usuários, grupos, permissões, auditoria, configurações, identidade visual e cadastros mestres de Empresas, Clientes e POPs/DCs;
+- **IPAM/Geofeed:** inventário de blocos e IPs públicos/privados, alocações operacionais e referência segura aos cadastros mestres para os dados publicados;
 - **ISP Network Health:** aplicação web para análises de domínios, IPv4, CIDR e ASN, baseada no núcleo recuperado do INH.
 
 O projeto é um monorepo. Cada aplicação e o PostgreSQL executam em containers separados. O Nginx Proxy Manager existente permanece externo e é conectado pela rede Docker configurada em `.env`.
@@ -15,7 +16,7 @@ O código foi recuperado de `/home/guilherme/Projects/geofeed-admin` e `/home/gu
 ## Estrutura
 
 ```text
-apps/admin-center/          Portal administrativo Flask/Jinja recuperado
+apps/admin-center/          Admin Center e aplicação IPAM/Geofeed Flask/Jinja
 apps/geofeed-public/        Nginx para artefatos públicos aprovados
 apps/isp-network-health/    Web, worker e núcleo Python do INH
 infra/postgres/init/        Criação dos bancos lógicos e usuários

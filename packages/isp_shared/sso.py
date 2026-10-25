@@ -35,6 +35,8 @@ def issue_handoff(
     role: str,
     applications: list[str],
     audience: str,
+    profile: str = "",
+    next_path: str = "",
     ttl_seconds: int = 60,
 ) -> str:
     if not secret:
@@ -46,12 +48,17 @@ def issue_handoff(
         "email": str(email)[:254],
         "name": str(display_name)[:160],
         "role": str(role)[:64],
+        # `role` remains for compatibility with older health containers. New
+        # consumers should use the explicit profile claim.
+        "profile": str(profile or role)[:64],
         "apps": sorted({str(item)[:64] for item in applications}),
         "aud": str(audience)[:64],
         "iat": now,
         "exp": now + max(15, min(int(ttl_seconds), 300)),
         "jti": secrets.token_urlsafe(18),
     }
+    if next_path:
+        payload["next"] = str(next_path)[:160]
     encoded = _encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
     signature = hmac.new(secret.encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).digest()
     return f"{encoded}.{_encode(signature)}"

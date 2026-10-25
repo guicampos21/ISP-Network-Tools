@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Cadastro · Admin Center{% endblock %}
+{% block content %}
+<div class="page-heading"><div><p class="eyebrow">Admin Center</p><h1>Cadastro</h1><p class="muted">Cadastros mestres compartilhados por todas as aplicações da suíte.</p></div></div>
+<section class="catalog-landing-grid" aria-label="Cadastros disponíveis">
+  {% if current_user.has_permission('catalog.services.view') %}<a class="catalog-landing-card" href="{{ url_for('panel.services') }}"><span class="catalog-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16v12H4zM8 10h8M8 14h5"></path></svg></span><span><strong>Catálogo de Serviços</strong><small>Itens que podem ser vinculados aos clientes.</small></span><b>→</b></a>{% endif %}
+  {% if current_user.has_permission('catalog.customers.view') %}<a class="catalog-landing-card" href="{{ url_for('panel.customers') }}"><span class="catalog-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3"></circle><path d="M3 20c.5-3.2 2.5-5 6-5s5.5 1.8 6 5M16 5a3 3 0 0 1 0 6M17 15c2.5.2 3.8 1.8 4 5"></path></svg></span><span><strong>Clientes</strong><small>Clientes e serviços contratados.</small></span><b>→</b></a>{% endif %}
+  {% if current_user.has_permission('catalog.companies.view') %}<a class="catalog-landing-card" href="{{ url_for('panel.companies') }}"><span class="catalog-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 21V5l8-3 8 3v16M8 9h2M14 9h2M8 13h2M14 13h2M8 17h8"></path></svg></span><span><strong>Empresas</strong><small>Razões sociais, CNPJs, ASNs e contatos.</small></span><b>→</b></a>{% endif %}
+  {% if current_user.has_permission('catalog.pops.view') %}<a class="catalog-landing-card" href="{{ url_for('panel.pops_dcs') }}"><span class="catalog-card-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20h16M6 20V9l6-5 6 5v11M9 13h6M9 17h6"></path></svg></span><span><strong>POPs/DCs</strong><small>Localização, acesso e autonomia energética.</small></span><b>→</b></a>{% endif %}
+</section>
+{% endblock %}

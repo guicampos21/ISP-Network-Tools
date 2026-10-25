@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Usuários online{% endblock %}
 {% block content %}
-<div class="page-heading"><div><p class="eyebrow">Presença operacional</p><h1>Usuários online</h1><p class="muted">Contas com atividade registrada nos últimos cinco minutos.</p></div><a class="button button-secondary" href="{{ url_for('panel.dashboard') }}">Voltar à visão geral</a></div>
+<div class="page-heading"><div><p class="eyebrow">Presença operacional</p><h1>Usuários online</h1><p class="muted">Contas com atividade registrada nos últimos cinco minutos.</p></div><a class="button button-secondary" href="{{ url_for('panel.dashboard') }}">Voltar ao Dashboard</a></div>
 <section class="card table-card">
   <div class="card-heading"><div><h2>{{ users|length }} usuário(s) ativo(s)</h2><p class="muted">A lista é atualizada quando cada usuário acessa uma área do Admin Center.</p></div></div>
   {% if users %}<div class="table-wrap"><table><thead><tr><th>Usuário</th><th>Perfil</th><th>Autenticação</th><th>Última atividade</th></tr></thead><tbody>{% for user in users %}<tr><td><span class="presence-dot" aria-hidden="true"></span><strong>{{ user.nickname or user.display_name or user.username or user.email }}</strong><small class="cell-sub">{{ user.email }}</small></td><td><span class="badge">{{ role_names.get(user.role, user.role) }}</span></td><td>{{ {'m365':'Microsoft 365','google':'Google','local':'Conta local'}.get(user.auth_provider, user.auth_provider) }}</td><td>{{ user.last_seen_at }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<p class="scan-empty">Nenhum usuário teve atividade nos últimos cinco minutos.</p>{% endif %}

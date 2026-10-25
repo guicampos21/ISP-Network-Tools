@@ -1,0 +1,4 @@
+<section class="card recent-activity-card">
+  <div class="card-heading"><div><p class="eyebrow">Rastreabilidade</p><h2>{{ title }}</h2><p class="muted">As alterações mais recentes aparecem aqui.</p></div></div>
+  {% if recent_activity %}<ol class="recent-activity-list">{% for log in recent_activity %}<li><span class="recent-activity-dot" aria-hidden="true"></span><div><strong>{{ (log.user.display_name or log.user.email) if log.user else 'Sistema' }}</strong><span>{{ log.action }}</span><small>{{ log.created_at.strftime('%d/%m/%Y %H:%M') if log.created_at else '—' }}</small></div></li>{% endfor %}</ol>{% else %}<p class="empty-state">Ainda não há alterações registradas.</p>{% endif %}
+</section>
